@@ -161,11 +161,10 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
 
     await bootstrapCredentials(user.id, "user-a@example.com", "correct-password");
 
-    const userB = await createUser(user.householdId, "User B");
     await request(app.getHttpServer())
       .post("/api/v1/auth/bootstrap-credentials")
       .set("x-setup-secret", "test-setup-secret")
-      .send({ userId: userB.id, email: "user-b@example.com", password: "correct-password" })
+      .send({ userId: user.id, email: "user-b@example.com", password: "correct-password" })
       .expect(403);
   });
 
@@ -258,9 +257,78 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     await request(app.getHttpServer()).get("/api/v1/auth/me").set(authHeader(freshLogin.accessToken)).expect(401);
   });
 
+  it("provisions credentials for a second existing user in the same household", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const userB = await createUser(auth.accessToken, auth.user.householdId, "User B");
+
+    const credential = await provisionCredentials(auth.accessToken, userB.id, "USER-B@EXAMPLE.COM", "correct-password");
+    expect(credential).toMatchObject({ userId: userB.id, email: "user-b@example.com" });
+
+    const userBAuth = await login("user-b@example.com");
+    const me = await request(app.getHttpServer())
+      .get("/api/v1/auth/me")
+      .set(authHeader(userBAuth.accessToken))
+      .expect(200)
+      .then((response) => response.body as { user: UserResponse });
+
+    expect(me.user.id).toBe(userB.id);
+  });
+
+  it("rejects provisioning credentials for users outside the authenticated household", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const { user: otherHouseholdUser } = await createHousehold("Other Home", "Other User");
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/household/users/${otherHouseholdUser.id}/credentials`)
+      .set(authHeader(auth.accessToken))
+      .send({ email: "other@example.com", password: "correct-password" })
+      .expect(403);
+  });
+
+  it("rejects duplicate credential provisioning and duplicate emails", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const userB = await createUser(auth.accessToken, auth.user.householdId, "User B");
+
+    await provisionCredentials(auth.accessToken, userB.id, "user-b@example.com", "correct-password");
+    await request(app.getHttpServer())
+      .post(`/api/v1/household/users/${userB.id}/credentials`)
+      .set(authHeader(auth.accessToken))
+      .send({ email: "user-b-again@example.com", password: "correct-password" })
+      .expect(409);
+
+    const userC = await createUser(auth.accessToken, auth.user.householdId, "User C");
+    await request(app.getHttpServer())
+      .post(`/api/v1/household/users/${userC.id}/credentials`)
+      .set(authHeader(auth.accessToken))
+      .send({ email: "user-a@example.com", password: "correct-password" })
+      .expect(409);
+  });
+
+  it("rejects unauthenticated, missing target, and short-password credential provisioning", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const userB = await createUser(auth.accessToken, auth.user.householdId, "User B");
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/household/users/${userB.id}/credentials`)
+      .send({ email: "user-b@example.com", password: "correct-password" })
+      .expect(401);
+
+    await request(app.getHttpServer())
+      .post("/api/v1/household/users/00000000-0000-0000-0000-000000000000/credentials")
+      .set(authHeader(auth.accessToken))
+      .send({ email: "missing@example.com", password: "correct-password" })
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/household/users/${userB.id}/credentials`)
+      .set(authHeader(auth.accessToken))
+      .send({ email: "user-b@example.com", password: "short" })
+      .expect(400);
+  });
+
   it("creates garments, lists available garments, selects outfit, confirms usage, and persists usage events", async () => {
     const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
-    await createUser(auth.user.householdId, "User B");
+    await createUser(auth.accessToken, auth.user.householdId, "User B");
 
     const top = await createGarment(auth.accessToken, "TOP", "black", "CLEAN_AVAILABLE", "Black tee");
     const bottom = await createGarment(auth.accessToken, "BOTTOM", "indigo", "WORN_REUSABLE", "Jeans");
@@ -329,7 +397,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
 
   it("does not expose USER_B garments to USER_A", async () => {
     const { auth: userA } = await createAuthenticatedUser("User A", "user-a@example.com");
-    const userB = await createUser(userA.user.householdId, "User B");
+    const userB = await createUser(userA.accessToken, userA.user.householdId, "User B");
     await seedCredentials(userB.id, "user-b@example.com", "correct-password");
     const userBAuth = await login("user-b@example.com");
 
@@ -347,7 +415,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
 
   it("rejects outfit selection and usage confirmation across users", async () => {
     const { auth: userA } = await createAuthenticatedUser("User A", "user-a@example.com");
-    const userB = await createUser(userA.user.householdId, "User B");
+    const userB = await createUser(userA.accessToken, userA.user.householdId, "User B");
     await seedCredentials(userB.id, "user-b@example.com", "correct-password");
     const userBAuth = await login("user-b@example.com");
 
@@ -423,9 +491,10 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       .then((response) => response.body as HouseholdResponse);
   }
 
-  async function createUser(householdId: string, displayName: string): Promise<UserResponse> {
+  async function createUser(accessToken: string, householdId: string, displayName: string): Promise<UserResponse> {
     return request(app.getHttpServer())
       .post(`/api/v1/households/${householdId}/users`)
+      .set(authHeader(accessToken))
       .send({ displayName })
       .expect(201)
       .then((response) => response.body as UserResponse);
@@ -464,6 +533,15 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
         passwordHash: await hash(password, { algorithm: Algorithm.Argon2id })
       }
     });
+  }
+
+  async function provisionCredentials(accessToken: string, userId: string, email: string, password: string) {
+    return request(app.getHttpServer())
+      .post(`/api/v1/household/users/${userId}/credentials`)
+      .set(authHeader(accessToken))
+      .send({ email, password })
+      .expect(201)
+      .then((response) => response.body as { id: string; userId: string; email: string });
   }
 
   async function createGarment(

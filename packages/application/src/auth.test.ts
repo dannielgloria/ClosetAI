@@ -9,6 +9,7 @@ import {
   LoginUseCase,
   LogoutUseCase,
   PasswordHasherPort,
+  ProvisionUserCredentialsUseCase,
   RefreshSessionUseCase,
   RefreshTokenGeneratorPort
 } from "./auth.js";
@@ -143,6 +144,18 @@ describe("Authentication use cases", () => {
       displayName: "Dann",
       createdAt: new Date("2026-08-24T00:00:00.000Z")
     });
+    ports.usersById.set("user-2", {
+      id: "user-2",
+      householdId: "household-1",
+      displayName: "Second",
+      createdAt: new Date("2026-08-24T00:00:00.000Z")
+    });
+    ports.usersById.set("user-3", {
+      id: "user-3",
+      householdId: "household-2",
+      displayName: "Other",
+      createdAt: new Date("2026-08-24T00:00:00.000Z")
+    });
   });
 
   it("creates credentials with a password hash", async () => {
@@ -180,6 +193,54 @@ describe("Authentication use cases", () => {
         password: "correct-password"
       })
     ).rejects.toThrow("Credential bootstrap is disabled.");
+  });
+
+  it("provisions credentials for a target user in the same household", async () => {
+    const credential = await provisionCredentials("user-1", "user-2", "second@example.com", "correct-password");
+
+    expect(credential.userId).toBe("user-2");
+    expect(credential.email).toBe("second@example.com");
+  });
+
+  it("rejects provisioning credentials for a target user in another household", async () => {
+    await expect(provisionCredentials("user-1", "user-3", "other@example.com", "correct-password")).rejects.toThrow(
+      "Cannot provision credentials outside household."
+    );
+  });
+
+  it("rejects provisioning credentials for a missing target user", async () => {
+    await expect(provisionCredentials("user-1", "missing-user", "missing@example.com", "correct-password")).rejects.toThrow(
+      "Target user not found."
+    );
+  });
+
+  it("rejects provisioning credentials when the target already has credentials", async () => {
+    await provisionCredentials("user-1", "user-2", "second@example.com", "correct-password");
+
+    await expect(provisionCredentials("user-1", "user-2", "second-again@example.com", "correct-password")).rejects.toThrow(
+      "User already has credentials."
+    );
+  });
+
+  it("rejects provisioning credentials with a duplicate email", async () => {
+    await createCredential();
+
+    await expect(provisionCredentials("user-1", "user-2", "dann@example.com", "correct-password")).rejects.toThrow(
+      "Email already has credentials."
+    );
+  });
+
+  it("rejects provisioning credentials with a short password", async () => {
+    await expect(provisionCredentials("user-1", "user-2", "second@example.com", "short")).rejects.toThrow(
+      "Password must be at least 10 characters."
+    );
+  });
+
+  it("hashes passwords before persistence when provisioning credentials", async () => {
+    const credential = await provisionCredentials("user-1", "user-2", "second@example.com", "correct-password");
+
+    expect(credential.passwordHash).toBe("hash:correct-password");
+    expect(credential.passwordHash).not.toBe("correct-password");
   });
 
   it("logs in with the correct password", async () => {
@@ -288,5 +349,14 @@ describe("Authentication use cases", () => {
 
   async function refresh(refreshToken: string) {
     return new RefreshSessionUseCase(ports, hasher, refreshTokens, accessTokens).execute({ refreshToken });
+  }
+
+  async function provisionCredentials(actorUserId: string, targetUserId: string, email: string, password: string) {
+    return new ProvisionUserCredentialsUseCase(ports, hasher).execute({
+      actorUserId,
+      targetUserId,
+      email,
+      password
+    });
   }
 });

@@ -5,9 +5,10 @@ import { PrismaModule } from "./prisma/prisma.module.js";
 import { HouseholdsController } from "./interfaces/households.controller.js";
 import { GarmentsController } from "./interfaces/garments.controller.js";
 import { OutfitsController } from "./interfaces/outfits.controller.js";
+import { PrivateSetupController } from "./interfaces/private-setup.controller.js";
 
 @Module({
   imports: [PrismaModule, AuthModule],
-  controllers: [HealthController, HouseholdsController, GarmentsController, OutfitsController]
+  controllers: [HealthController, HouseholdsController, GarmentsController, OutfitsController, PrivateSetupController]
 })
 export class AppModule {}

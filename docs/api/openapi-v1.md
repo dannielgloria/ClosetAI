@@ -42,7 +42,7 @@ Request:
 {
   "userId": "uuid",
   "email": "user@example.com",
-  "password": "minimum-8-characters"
+  "password": "minimum-10-characters"
 }
 ```
 
@@ -50,10 +50,41 @@ Responses:
 
 ```text
 201 credentials created
-400 invalid input or duplicate credentials
+400 invalid input
+409 duplicate credentials or email conflict
 403 missing or invalid setup secret, or bootstrap disabled
 404 user not found
 429 too many bootstrap attempts
+```
+
+### Provision Existing User Credentials
+
+```text
+POST /api/v1/household/users/{userId}/credentials
+```
+
+Requires Bearer auth. Provisions credentials for an existing user in the same
+household as the authenticated user. This endpoint does not create users, does
+not change existing credentials, and is not public registration.
+
+Request:
+
+```json
+{
+  "email": "second-user@example.com",
+  "password": "minimum-10-characters"
+}
+```
+
+Responses:
+
+```text
+201 credentials provisioned
+400 invalid input
+401 missing, invalid, expired, or revoked access token
+403 target user belongs to a different household
+404 target user not found
+409 target user already has credentials or email is already used
 ```
 
 ### Login
@@ -144,6 +175,7 @@ Authenticated endpoints derive the user from the access token. Clients must not
 send `userId` for normal wardrobe or outfit actions.
 
 ```text
+POST /api/v1/households/{householdId}/users
 POST /api/v1/garments
 GET  /api/v1/garments
 GET  /api/v1/garments/available

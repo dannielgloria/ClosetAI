@@ -17,6 +17,28 @@ export class BootstrapCredentialsDto {
   password!: string;
 }
 
+export class ProvisionUserCredentialsDto {
+  @ApiProperty()
+  @IsEmail()
+  email!: string;
+
+  @ApiProperty()
+  @IsString()
+  @MinLength(10)
+  password!: string;
+}
+
+export class CredentialResponseDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  userId!: string;
+
+  @ApiProperty()
+  email!: string;
+}
+
 export class LoginDto {
   @ApiProperty()
   @IsEmail()

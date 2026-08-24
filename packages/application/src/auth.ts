@@ -57,6 +57,13 @@ export interface LogoutInput {
   sessionId: EntityId;
 }
 
+export interface ProvisionCredentialInput {
+  actorUserId: EntityId;
+  targetUserId: EntityId;
+  email: string;
+  password: string;
+}
+
 const MIN_PASSWORD_LENGTH = 10;
 
 export class CreateUserCredentialUseCase {
@@ -78,6 +85,11 @@ export class CreateUserCredentialUseCase {
       throw new Error("User already has credentials.");
     }
 
+    const existingEmail = await this.ports.userCredentials.findByEmail(email);
+    if (existingEmail) {
+      throw new Error("Email already has credentials.");
+    }
+
     const passwordHash = await this.passwordHasher.hashPassword(input.password);
     return this.ports.userCredentials.create({ userId: input.userId, email, passwordHash });
   }
@@ -96,6 +108,35 @@ export class BootstrapUserCredentialUseCase {
     }
 
     return new CreateUserCredentialUseCase(this.ports, this.passwordHasher).execute(input);
+  }
+}
+
+export class ProvisionUserCredentialsUseCase {
+  constructor(
+    private readonly ports: ApplicationPorts,
+    private readonly passwordHasher: PasswordHasherPort
+  ) {}
+
+  async execute(input: ProvisionCredentialInput): Promise<UserCredential> {
+    const actor = await this.ports.users.findById(input.actorUserId);
+    if (!actor) {
+      throw new Error("Actor user not found.");
+    }
+
+    const target = await this.ports.users.findById(input.targetUserId);
+    if (!target) {
+      throw new Error("Target user not found.");
+    }
+
+    if (actor.householdId !== target.householdId) {
+      throw new Error("Cannot provision credentials outside household.");
+    }
+
+    return new CreateUserCredentialUseCase(this.ports, this.passwordHasher).execute({
+      userId: target.id,
+      email: input.email,
+      password: input.password
+    });
   }
 }
 
