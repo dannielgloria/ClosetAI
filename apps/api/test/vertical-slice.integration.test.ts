@@ -5,11 +5,14 @@ import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { Algorithm, hash } from "@node-rs/argon2";
 import { PrismaClient } from "@prisma/client";
+import { ContextInterpreterPort } from "@closet-ai/application";
+import { ActivityType, InterpretedContext } from "@closet-ai/domain";
 import request from "supertest";
 import { GenericContainer, StartedTestContainer, Wait } from "testcontainers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module.js";
 import { configureHttpHardening } from "../src/config/http-hardening.js";
+import { CONTEXT_INTERPRETER } from "../src/context/context-interpreter.provider.js";
 
 interface HouseholdResponse {
   household: { id: string; name: string };
@@ -57,6 +60,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
   let redisContainer: StartedTestContainer;
   let app: INestApplication;
   let prisma: PrismaClient;
+  let contextInterpreterResult: InterpretedContext | Error;
 
   beforeAll(async () => {
     container = await new GenericContainer("postgres:16-alpine")
@@ -100,7 +104,18 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
 
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule]
-    }).compile();
+    })
+      .overrideProvider(CONTEXT_INTERPRETER)
+      .useValue({
+        interpret: async () => {
+          if (contextInterpreterResult instanceof Error) {
+            throw contextInterpreterResult;
+          }
+
+          return contextInterpreterResult;
+        }
+      } satisfies ContextInterpreterPort)
+      .compile();
 
     app = moduleRef.createNestApplication();
     configureHttpHardening(app);
@@ -121,6 +136,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     process.env.AUTH_REFRESH_RATE_LIMIT_MAX = "100";
     process.env.AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS = "60";
     process.env.AUTH_REFRESH_RATE_LIMIT_WINDOW_SECONDS = "60";
+    contextInterpreterResult = { activities: [{ type: ActivityType.GYM, time: "17:00" }] };
     await prisma.garmentUsageEvent.deleteMany();
     await prisma.outfitItem.deleteMany();
     await prisma.outfit.deleteMany();
@@ -481,6 +497,47 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     await expectWearCount(wornGarmentIds[1], 1);
     await expectWearCount(notWornGarmentId, 0);
     await expect(prisma.garmentUsageEvent.count({ where: { outfitId: outfit.id } })).resolves.toBe(2);
+  });
+
+  it("interprets natural language context through an authenticated HTTP endpoint", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    contextInterpreterResult = {
+      activities: [
+        { type: ActivityType.GYM, time: "17:00" },
+        { type: ActivityType.CASUAL_DINNER, time: null }
+      ]
+    };
+
+    const interpreted = await request(app.getHttpServer())
+      .post("/api/v1/context/interpret")
+      .set(authHeader(auth.accessToken))
+      .send({ text: "Hoy voy al gimnasio a las cinco y despues tengo una cena informal." })
+      .expect(200)
+      .then((response) => response.body as InterpretedContext);
+
+    expect(interpreted).toEqual(contextInterpreterResult);
+  });
+
+  it("rejects unauthenticated and malformed context interpretation requests", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+
+    await request(app.getHttpServer())
+      .post("/api/v1/context/interpret")
+      .send({ text: "Hoy voy al gimnasio." })
+      .expect(401);
+
+    await request(app.getHttpServer()).post("/api/v1/context/interpret").set(authHeader(auth.accessToken)).send({ text: "" }).expect(400);
+  });
+
+  it("returns a controlled error when context interpretation fails", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    contextInterpreterResult = new Error("provider failed");
+
+    await request(app.getHttpServer())
+      .post("/api/v1/context/interpret")
+      .set(authHeader(auth.accessToken))
+      .send({ text: "Hoy voy al gimnasio." })
+      .expect(503);
   });
 
   async function createHousehold(name: string, initialUserDisplayName: string): Promise<HouseholdResponse> {

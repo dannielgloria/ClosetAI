@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import 'application/auth_controller.dart';
+import 'application/context_controller.dart';
 import 'application/wardrobe_controller.dart';
 import 'data/auth_repository.dart';
 import 'data/closet_api_client.dart';
+import 'data/context_repository.dart';
 import 'data/token_storage.dart';
 import 'data/wardrobe_repository.dart';
 import 'domain/garment.dart';
@@ -26,6 +28,7 @@ void main() {
     ClosetAiApp(
       authController: authController,
       wardrobeRepository: ApiWardrobeRepository(apiClient),
+      contextRepository: ApiContextRepository(apiClient),
     ),
   );
 }
@@ -34,11 +37,13 @@ class ClosetAiApp extends StatelessWidget {
   const ClosetAiApp({
     required this.authController,
     required this.wardrobeRepository,
+    required this.contextRepository,
     super.key,
   });
 
   final AuthController authController;
   final WardrobeRepository wardrobeRepository;
+  final ContextRepository contextRepository;
 
   @override
   Widget build(BuildContext context) {
@@ -57,6 +62,7 @@ class ClosetAiApp extends StatelessWidget {
       home: AuthenticatedAppShell(
         authController: authController,
         wardrobeRepository: wardrobeRepository,
+        contextRepository: contextRepository,
       ),
     );
   }
@@ -66,11 +72,13 @@ class AuthenticatedAppShell extends StatefulWidget {
   const AuthenticatedAppShell({
     required this.authController,
     required this.wardrobeRepository,
+    required this.contextRepository,
     super.key,
   });
 
   final AuthController authController;
   final WardrobeRepository wardrobeRepository;
+  final ContextRepository contextRepository;
 
   @override
   State<AuthenticatedAppShell> createState() => _AuthenticatedAppShellState();
@@ -78,6 +86,7 @@ class AuthenticatedAppShell extends StatefulWidget {
 
 class _AuthenticatedAppShellState extends State<AuthenticatedAppShell> {
   WardrobeController? _wardrobeController;
+  ContextController? _contextController;
 
   AuthController get _authController => widget.authController;
 
@@ -92,6 +101,7 @@ class _AuthenticatedAppShellState extends State<AuthenticatedAppShell> {
   void dispose() {
     _authController.removeListener(_handleControllerChange);
     _wardrobeController?.dispose();
+    _contextController?.dispose();
     super.dispose();
   }
 
@@ -109,13 +119,17 @@ class _AuthenticatedAppShellState extends State<AuthenticatedAppShell> {
       case AuthStatus.signedOut:
         _wardrobeController?.dispose();
         _wardrobeController = null;
+        _contextController?.dispose();
+        _contextController = null;
         return LoginScreen(controller: _authController);
       case AuthStatus.signedIn:
         _wardrobeController ??= WardrobeController(widget.wardrobeRepository)
           ..loadGarments();
+        _contextController ??= ContextController(widget.contextRepository);
         return WardrobeHomeScreen(
           authController: _authController,
           controller: _wardrobeController!,
+          contextController: _contextController!,
         );
     }
   }
@@ -211,28 +225,38 @@ class WardrobeHomeScreen extends StatefulWidget {
   const WardrobeHomeScreen({
     required this.authController,
     required this.controller,
+    required this.contextController,
     super.key,
   });
 
   final AuthController authController;
   final WardrobeController controller;
+  final ContextController contextController;
 
   @override
   State<WardrobeHomeScreen> createState() => _WardrobeHomeScreenState();
 }
 
 class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
+  final _contextTextController = TextEditingController(
+    text: 'Hoy voy al gimnasio a las cinco y despues a cenar.',
+  );
+
   WardrobeController get _controller => widget.controller;
+  ContextController get _contextController => widget.contextController;
 
   @override
   void initState() {
     super.initState();
     _controller.addListener(_handleControllerChange);
+    _contextController.addListener(_handleControllerChange);
   }
 
   @override
   void dispose() {
     _controller.removeListener(_handleControllerChange);
+    _contextController.removeListener(_handleControllerChange);
+    _contextTextController.dispose();
     super.dispose();
   }
 
@@ -309,6 +333,53 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
             else
               for (final garment in _controller.garments)
                 _GarmentTile(garment: garment),
+            const SizedBox(height: 28),
+            Text(
+              'Context',
+              style: textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _contextTextController,
+              minLines: 2,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                labelText: '¿Qué vas a hacer hoy?',
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _contextController.isLoading
+                  ? null
+                  : _interpretContext,
+              icon: const Icon(Icons.auto_awesome),
+              label: const Text('Interpretar'),
+            ),
+            if (_contextController.isLoading) ...[
+              const SizedBox(height: 12),
+              const LinearProgressIndicator(),
+            ],
+            if (_contextController.errorMessage != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _contextController.errorMessage!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+            if (_contextController.interpretedContext != null) ...[
+              const SizedBox(height: 12),
+              for (final activity
+                  in _contextController.interpretedContext!.activities)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.event_available_outlined),
+                  title: Text(activity.type),
+                  subtitle: Text(activity.time ?? 'Sin hora'),
+                ),
+            ],
           ],
         ),
       ),
@@ -317,6 +388,10 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
 
   Future<void> _loadGarments() {
     return _controller.loadGarments();
+  }
+
+  Future<void> _interpretContext() {
+    return _contextController.interpret(_contextTextController.text);
   }
 
   Future<void> _showCreateGarmentDialog() async {

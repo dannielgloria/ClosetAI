@@ -1,8 +1,10 @@
 import 'package:closet_ai_mobile/application/auth_controller.dart';
 import 'package:closet_ai_mobile/data/auth_repository.dart';
+import 'package:closet_ai_mobile/data/context_repository.dart';
 import 'package:closet_ai_mobile/data/wardrobe_repository.dart';
 import 'package:closet_ai_mobile/domain/auth_user.dart';
 import 'package:closet_ai_mobile/domain/garment.dart';
+import 'package:closet_ai_mobile/domain/interpreted_context.dart';
 import 'package:closet_ai_mobile/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +20,7 @@ void main() {
       ClosetAiApp(
         authController: AuthController(authRepository),
         wardrobeRepository: repository,
+        contextRepository: FakeContextRepository(),
       ),
     );
     await tester.pumpAndSettle();
@@ -50,6 +53,12 @@ void main() {
 
     expect(repository.createdGarments, 1);
     expect(find.text('White sneakers'), findsOneWidget);
+
+    await tester.tap(find.text('Interpretar'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('GYM'), findsOneWidget);
+    expect(find.text('17:00'), findsOneWidget);
   });
 }
 
@@ -119,5 +128,14 @@ class FakeAuthRepository implements AuthRepository {
   @override
   Future<AuthUser?> restoreSession() async {
     return null;
+  }
+}
+
+class FakeContextRepository implements ContextRepository {
+  @override
+  Future<InterpretedContext> interpret(String text) async {
+    return const InterpretedContext(
+      activities: [ActivityContext(type: 'GYM', time: '17:00')],
+    );
   }
 }

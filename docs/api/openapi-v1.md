@@ -169,6 +169,70 @@ Responses:
 429 not applied
 ```
 
+## Context Interpretation
+
+### Interpret Context
+
+```text
+POST /api/v1/context/interpret
+```
+
+Requires Bearer auth. Converts natural-language user plans into structured
+activity context. The endpoint does not select garments, generate outfits,
+persist context, or modify wardrobe state.
+
+Request:
+
+```json
+{
+  "text": "Hoy voy al gimnasio a las cinco y despues tengo una cena informal."
+}
+```
+
+Response:
+
+```json
+{
+  "activities": [
+    {
+      "type": "GYM",
+      "time": "17:00"
+    },
+    {
+      "type": "CASUAL_DINNER",
+      "time": null
+    }
+  ]
+}
+```
+
+Allowed activity types:
+
+```text
+HOME
+HOME_OFFICE
+OFFICE
+GYM
+RUNNING
+CASUAL_OUTING
+DINNER
+CASUAL_DINNER
+DATE
+PARTY
+FORMAL_EVENT
+TRAVEL
+WALK
+```
+
+Responses:
+
+```text
+200 structured interpreted context
+400 invalid input
+401 missing, invalid, expired, or revoked access token
+503 AI provider unavailable or invalid provider output
+```
+
 ## MVP Wardrobe Endpoints
 
 Authenticated endpoints derive the user from the access token. Clients must not

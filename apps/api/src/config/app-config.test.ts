@@ -14,6 +14,8 @@ describe("runtime configuration", () => {
     delete process.env.JWT_REFRESH_SECRET;
     delete process.env.SETUP_SECRET;
     delete process.env.DATABASE_PASSWORD;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_CONTEXT_MODEL;
 
     expect(() => validateProductionConfig()).toThrow("Missing or insecure production configuration");
   });
@@ -25,6 +27,8 @@ describe("runtime configuration", () => {
     process.env.JWT_ACCESS_SECRET = "strong-access-secret";
     process.env.JWT_REFRESH_SECRET = "strong-refresh-secret";
     process.env.SETUP_SECRET = "strong-setup-secret";
+    process.env.OPENAI_API_KEY = "strong-openai-key";
+    process.env.AI_CONTEXT_MODEL = "gpt-example";
     process.env.CORS_ALLOWED_ORIGINS = "*";
 
     expect(() => validateProductionConfig()).toThrow("Production requires explicit CORS_ALLOWED_ORIGINS");
@@ -37,6 +41,8 @@ describe("runtime configuration", () => {
     process.env.JWT_ACCESS_SECRET = "strong-access-secret";
     process.env.JWT_REFRESH_SECRET = "strong-refresh-secret";
     process.env.SETUP_SECRET = "strong-setup-secret";
+    process.env.OPENAI_API_KEY = "strong-openai-key";
+    process.env.AI_CONTEXT_MODEL = "gpt-example";
     process.env.CORS_ALLOWED_ORIGINS = "https://closet.example";
 
     expect(() => validateProductionConfig()).not.toThrow();

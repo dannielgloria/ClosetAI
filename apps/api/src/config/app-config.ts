@@ -21,7 +21,15 @@ export function validateProductionConfig(): void {
     return;
   }
 
-  const required = ["DATABASE_URL", "DATABASE_PASSWORD", "JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "SETUP_SECRET"];
+  const required = [
+    "DATABASE_URL",
+    "DATABASE_PASSWORD",
+    "JWT_ACCESS_SECRET",
+    "JWT_REFRESH_SECRET",
+    "SETUP_SECRET",
+    "OPENAI_API_KEY",
+    "AI_CONTEXT_MODEL"
+  ];
   const missingOrInsecure = required.filter((name) => {
     const value = process.env[name]?.trim() ?? "";
     return INSECURE_PRODUCTION_VALUES.has(value);
