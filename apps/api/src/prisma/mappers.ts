@@ -3,7 +3,12 @@ import {
   ClosetUser,
   Garment,
   GarmentCategory,
+  GarmentFit,
+  GarmentImage,
+  GarmentMaterial,
+  GarmentPattern,
   GarmentStatus,
+  GarmentSubcategory,
   GarmentUsageEvent,
   Household,
   Outfit,
@@ -39,13 +44,29 @@ type PrismaGarment = {
   id: string;
   userId: string;
   category: string;
+  subcategory: string | null;
   primaryColor: string;
+  secondaryColors: string[];
+  pattern: string | null;
+  fit: string | null;
+  estimatedMaterial: string | null;
+  formality: number | null;
   status: string;
   name: string | null;
   wearCount: number;
   lastWornAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  images?: { id: string; createdAt: Date }[];
+};
+type PrismaGarmentImage = {
+  id: string;
+  userId: string;
+  garmentId: string | null;
+  objectKey: string;
+  mimeType: string;
+  size: number;
+  createdAt: Date;
 };
 type PrismaOutfit = {
   id: string;
@@ -115,13 +136,32 @@ export function mapGarment(row: PrismaGarment): Garment {
     id: row.id,
     userId: row.userId,
     category: row.category as GarmentCategory,
+    subcategory: row.subcategory as GarmentSubcategory | null,
     primaryColor: row.primaryColor,
+    secondaryColors: row.secondaryColors,
+    pattern: row.pattern as GarmentPattern | null,
+    fit: row.fit as GarmentFit | null,
+    estimatedMaterial: row.estimatedMaterial as GarmentMaterial | null,
+    formality: row.formality,
     status: row.status as GarmentStatus,
     name: row.name ?? undefined,
+    imageId: row.images?.[0]?.id,
     wearCount: row.wearCount,
     lastWornAt: row.lastWornAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
+  };
+}
+
+export function mapGarmentImage(row: PrismaGarmentImage): GarmentImage {
+  return {
+    id: row.id,
+    userId: row.userId,
+    garmentId: row.garmentId,
+    objectKey: row.objectKey,
+    mimeType: row.mimeType,
+    size: row.size,
+    createdAt: row.createdAt
   };
 }
 

@@ -33,6 +33,53 @@ enum GarmentStatus {
   DISCARDED
 }
 
+enum GarmentSubcategory {
+  T_SHIRT
+  SHIRT
+  SWEATER
+  HOODIE
+  JACKET
+  JEANS
+  TROUSERS
+  SHORTS
+  SKIRT
+  DRESS
+  SNEAKERS
+  BOOTS
+  DRESS_SHOES
+  SANDALS
+  ACCESSORY
+  UNKNOWN
+}
+
+enum GarmentPattern {
+  SOLID
+  STRIPED
+  CHECKED
+  PRINTED
+  TEXTURED
+  UNKNOWN
+}
+
+enum GarmentFit {
+  SLIM
+  REGULAR
+  RELAXED
+  OVERSIZED
+  UNKNOWN
+}
+
+enum GarmentMaterial {
+  COTTON
+  DENIM
+  WOOL
+  LINEN
+  LEATHER
+  SYNTHETIC
+  KNIT
+  UNKNOWN
+}
+
 enum OutfitStatus {
   GENERATED
   PRESENTED
@@ -68,6 +115,7 @@ model User {
   credential     UserCredential?
   authSessions   AuthSession[]
   outfitFeedback OutfitFeedback[]
+  garmentImages  GarmentImage[]
 
   @@index([householdId])
   @@map("users")
@@ -105,22 +153,45 @@ model AuthSession {
 }
 
 model Garment {
-  id           String              @id @default(uuid()) @db.Uuid
-  userId       String              @map("user_id") @db.Uuid
-  category     GarmentCategory
-  primaryColor String              @map("primary_color")
-  status       GarmentStatus       @default(CLEAN_AVAILABLE)
-  name         String?
-  wearCount    Int                 @default(0) @map("wear_count")
-  lastWornAt   DateTime?           @map("last_worn_at")
-  createdAt    DateTime            @default(now()) @map("created_at")
-  updatedAt    DateTime            @updatedAt @map("updated_at")
-  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  outfitItems  OutfitItem[]
-  usageEvents  GarmentUsageEvent[]
+  id                String              @id @default(uuid()) @db.Uuid
+  userId            String              @map("user_id") @db.Uuid
+  category          GarmentCategory
+  subcategory       GarmentSubcategory?
+  primaryColor      String              @map("primary_color")
+  secondaryColors   String[]            @default([]) @map("secondary_colors")
+  pattern           GarmentPattern?
+  fit               GarmentFit?
+  estimatedMaterial GarmentMaterial?    @map("estimated_material")
+  formality         Int?
+  status            GarmentStatus       @default(CLEAN_AVAILABLE)
+  name              String?
+  wearCount         Int                 @default(0) @map("wear_count")
+  lastWornAt        DateTime?           @map("last_worn_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images            GarmentImage[]
+  outfitItems       OutfitItem[]
+  usageEvents       GarmentUsageEvent[]
 
   @@index([userId, status])
   @@map("garments")
+}
+
+model GarmentImage {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  garmentId String?  @map("garment_id") @db.Uuid
+  objectKey String   @unique @map("object_key")
+  mimeType  String   @map("mime_type")
+  size      Int
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  garment   Garment? @relation(fields: [garmentId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([garmentId])
+  @@map("garment_images")
 }
 
 model Outfit {

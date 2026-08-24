@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ResponseCreateParamsNonStreaming } from "openai/resources/responses/responses";
 import { ContextInterpretationFailedError } from "@closet-ai/application";
 import { ActivityType } from "@closet-ai/domain";
+import { AiConfig } from "../ai/ai-config.js";
 import { OpenAIContextInterpreterAdapter } from "./openai-context-interpreter.adapter.js";
 
 class FakeOpenAIClient {
@@ -22,17 +23,21 @@ class FakeOpenAIClient {
 }
 
 describe("OpenAIContextInterpreterAdapter", () => {
+  const config: AiConfig = {
+    openAiApiKey: "test-key",
+    contextModel: "test-context-model",
+    outfitModel: "test-outfit-model",
+    visionModel: "test-vision-model",
+    requestTimeoutMs: 5000,
+    garmentImageMaxSizeBytes: 8 * 1024 * 1024
+  };
+
   it("requests structured output through the configured model and prompt", async () => {
     const client = new FakeOpenAIClient({
       output_text: JSON.stringify({ activities: [{ type: ActivityType.GYM, time: "17:00" }] }),
       status: "completed"
     });
-    const adapter = new OpenAIContextInterpreterAdapter(client, {
-      openAiApiKey: "test-key",
-      contextModel: "test-context-model",
-      outfitModel: "test-outfit-model",
-      requestTimeoutMs: 5000
-    });
+    const adapter = new OpenAIContextInterpreterAdapter(client, config);
 
     await adapter.interpret({ text: "Hoy voy al gimnasio a las cinco." });
 
@@ -52,7 +57,7 @@ describe("OpenAIContextInterpreterAdapter", () => {
           ]
         })
       }),
-      { openAiApiKey: "test-key", contextModel: "test-context-model", outfitModel: "test-outfit-model", requestTimeoutMs: 5000 }
+      config
     );
 
     await expect(adapter.interpret({ text: "Gimnasio y cena." })).resolves.toEqual({
@@ -68,7 +73,9 @@ describe("OpenAIContextInterpreterAdapter", () => {
       openAiApiKey: undefined,
       contextModel: undefined,
       outfitModel: undefined,
-      requestTimeoutMs: 5000
+      visionModel: undefined,
+      requestTimeoutMs: 5000,
+      garmentImageMaxSizeBytes: 8 * 1024 * 1024
     });
 
     await expect(adapter.interpret({ text: "Voy al gimnasio." })).rejects.toThrow(ContextInterpretationFailedError);
@@ -77,7 +84,7 @@ describe("OpenAIContextInterpreterAdapter", () => {
   it("wraps provider errors", async () => {
     const adapter = new OpenAIContextInterpreterAdapter(
       new FakeOpenAIClient(new Error("timeout")),
-      { openAiApiKey: "test-key", contextModel: "test-context-model", outfitModel: "test-outfit-model", requestTimeoutMs: 5000 }
+      config
     );
 
     await expect(adapter.interpret({ text: "Voy al gimnasio." })).rejects.toThrow(ContextInterpretationFailedError);
@@ -86,7 +93,7 @@ describe("OpenAIContextInterpreterAdapter", () => {
   it("rejects unknown activity enums", async () => {
     const adapter = new OpenAIContextInterpreterAdapter(
       new FakeOpenAIClient({ output_text: JSON.stringify({ activities: [{ type: "SHOPPING_MALL", time: null }] }) }),
-      { openAiApiKey: "test-key", contextModel: "test-context-model", outfitModel: "test-outfit-model", requestTimeoutMs: 5000 }
+      config
     );
 
     await expect(adapter.interpret({ text: "Voy al centro comercial." })).rejects.toThrow(ContextInterpretationFailedError);
@@ -95,7 +102,7 @@ describe("OpenAIContextInterpreterAdapter", () => {
   it("rejects malformed output", async () => {
     const adapter = new OpenAIContextInterpreterAdapter(
       new FakeOpenAIClient({ output_text: "not-json" }),
-      { openAiApiKey: "test-key", contextModel: "test-context-model", outfitModel: "test-outfit-model", requestTimeoutMs: 5000 }
+      config
     );
 
     await expect(adapter.interpret({ text: "Voy al gimnasio." })).rejects.toThrow(ContextInterpretationFailedError);

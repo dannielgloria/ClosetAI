@@ -30,6 +30,11 @@ For natural-language context interpretation:
 
 For outfit styling, OpenAI may rank and compose outfits only from backend-supplied eligible garment candidates. The application must validate every returned garment ID and persist only valid recommendations.
 
+For garment analysis, OpenAI Vision may propose garment metadata only. The
+application must validate the structured output and the user must confirm or
+edit the proposal before a `Garment` is created. Uploaded images remain private
+objects owned by the authenticated user.
+
 ## Alternatives Considered
 
 - A generic `AIService.generate(prompt)` abstraction.

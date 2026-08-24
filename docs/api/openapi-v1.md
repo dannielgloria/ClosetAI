@@ -243,10 +243,146 @@ POST /api/v1/households/{householdId}/users
 POST /api/v1/garments
 GET  /api/v1/garments
 GET  /api/v1/garments/available
+POST /api/v1/garment-images
+POST /api/v1/garment-images/{imageId}/analyze
+GET  /api/v1/garment-images/{imageId}
 POST /api/v1/outfit-recommendations
 POST /api/v1/outfits/{outfitId}/select
 POST /api/v1/outfits/{outfitId}/confirm-usage
 POST /api/v1/outfits/{outfitId}/feedback
+```
+
+### Create Garment
+
+```text
+POST /api/v1/garments
+```
+
+Requires Bearer auth. Creates a garment for the authenticated user. For assisted
+registration, clients may pass an authenticated `imageId` that was previously
+uploaded and analyzed. The backend creates the garment and links the image in a
+single transaction.
+
+Request:
+
+```json
+{
+  "category": "TOP",
+  "subcategory": "T_SHIRT",
+  "primaryColor": "CREAM",
+  "secondaryColors": ["BLACK"],
+  "pattern": "SOLID",
+  "fit": "REGULAR",
+  "estimatedMaterial": "COTTON",
+  "formality": 2,
+  "status": "CLEAN_AVAILABLE",
+  "name": "Cream tee",
+  "imageId": "uuid"
+}
+```
+
+Responses:
+
+```text
+201 garment created
+400 invalid metadata
+401 missing, invalid, expired, or revoked access token
+403 image belongs to another user
+404 user or image not found
+```
+
+### Upload Garment Image
+
+```text
+POST /api/v1/garment-images
+```
+
+Requires Bearer auth and `multipart/form-data`.
+
+Form fields:
+
+```text
+image=<file>
+```
+
+Allowed MIME types:
+
+```text
+image/jpeg
+image/png
+image/webp
+```
+
+Maximum size is configured by `GARMENT_IMAGE_MAX_SIZE_MB`.
+
+Response:
+
+```json
+{
+  "id": "uuid",
+  "status": "UPLOADED"
+}
+```
+
+Responses:
+
+```text
+201 image uploaded
+400 missing, empty, unsupported, or oversized image
+401 missing, invalid, expired, or revoked access token
+```
+
+### Analyze Garment Image
+
+```text
+POST /api/v1/garment-images/{imageId}/analyze
+```
+
+Requires Bearer auth. Runs OpenAI Vision on an image owned by the authenticated
+user and returns proposed metadata only. This endpoint does not create a
+garment.
+
+Response:
+
+```json
+{
+  "category": "TOP",
+  "subcategory": "T_SHIRT",
+  "primaryColor": "CREAM",
+  "secondaryColors": ["BLACK"],
+  "pattern": "SOLID",
+  "fit": "REGULAR",
+  "estimatedMaterial": "COTTON",
+  "formality": 2
+}
+```
+
+Responses:
+
+```text
+200 proposed metadata
+401 missing, invalid, expired, or revoked access token
+403 image belongs to another user
+404 image not found
+503 AI provider unavailable or invalid provider output
+```
+
+### Fetch Garment Image
+
+```text
+GET /api/v1/garment-images/{imageId}
+```
+
+Requires Bearer auth. Returns private image bytes after ownership validation.
+No physical object-storage path is exposed.
+
+Responses:
+
+```text
+200 image bytes
+401 missing, invalid, expired, or revoked access token
+403 image belongs to another user
+404 image not found
 ```
 
 ### Generate Outfit Recommendations

@@ -3,6 +3,7 @@ import {
   ClosetUser,
   EntityId,
   Garment,
+  GarmentImage,
   GarmentUsageEvent,
   Household,
   Outfit,
@@ -54,6 +55,12 @@ export interface GarmentRepositoryPort {
     userId: EntityId;
     category: Garment["category"];
     primaryColor: string;
+    secondaryColors?: string[];
+    subcategory?: Garment["subcategory"];
+    pattern?: Garment["pattern"];
+    fit?: Garment["fit"];
+    estimatedMaterial?: Garment["estimatedMaterial"];
+    formality?: number | null;
     status: Garment["status"];
     name?: string;
   }): Promise<Garment>;
@@ -61,6 +68,12 @@ export interface GarmentRepositoryPort {
   findAvailableByUserId(userId: EntityId): Promise<Garment[]>;
   findByIds(ids: EntityId[]): Promise<Garment[]>;
   save(garment: Garment): Promise<Garment>;
+}
+
+export interface GarmentImageRepositoryPort {
+  create(input: { userId: EntityId; objectKey: string; mimeType: string; size: number }): Promise<GarmentImage>;
+  findById(id: EntityId): Promise<GarmentImage | null>;
+  linkToGarment(input: { imageId: EntityId; garmentId: EntityId }): Promise<GarmentImage>;
 }
 
 export interface OutfitRepositoryPort {
@@ -100,6 +113,7 @@ export interface ApplicationPorts {
   userCredentials: UserCredentialRepositoryPort;
   authSessions: AuthSessionRepositoryPort;
   garments: GarmentRepositoryPort;
+  garmentImages: GarmentImageRepositoryPort;
   outfits: OutfitRepositoryPort;
   usageEvents: UsageEventRepositoryPort;
   outfitFeedback: OutfitFeedbackRepositoryPort;

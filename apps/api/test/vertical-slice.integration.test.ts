@@ -5,15 +5,25 @@ import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { Algorithm, hash } from "@node-rs/argon2";
 import { PrismaClient } from "@prisma/client";
-import { ContextInterpreterPort, OutfitStylistFailedError, OutfitStylistPort, OutfitStylistRecommendationCandidate } from "@closet-ai/application";
-import { ActivityType, InterpretedContext } from "@closet-ai/domain";
+import {
+  ContextInterpreterPort,
+  GarmentAnalysisFailedError,
+  GarmentAnalyzerPort,
+  ObjectStoragePort,
+  OutfitStylistFailedError,
+  OutfitStylistPort,
+  OutfitStylistRecommendationCandidate
+} from "@closet-ai/application";
+import { ActivityType, GarmentCategory, GarmentFit, GarmentMaterial, GarmentPattern, GarmentSubcategory, InterpretedContext } from "@closet-ai/domain";
 import request from "supertest";
 import { GenericContainer, StartedTestContainer, Wait } from "testcontainers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module.js";
 import { configureHttpHardening } from "../src/config/http-hardening.js";
 import { CONTEXT_INTERPRETER } from "../src/context/context-interpreter.provider.js";
+import { GARMENT_ANALYZER } from "../src/garment-analyzer/garment-analyzer.provider.js";
 import { OUTFIT_STYLIST } from "../src/outfit-stylist/outfit-stylist.provider.js";
+import { OBJECT_STORAGE } from "../src/storage/object-storage.provider.js";
 
 interface HouseholdResponse {
   household: { id: string; name: string };
@@ -37,7 +47,14 @@ interface GarmentResponse {
   userId: string;
   category: string;
   primaryColor: string;
+  secondaryColors: string[];
+  subcategory: string | null;
+  pattern: string | null;
+  fit: string | null;
+  estimatedMaterial: string | null;
+  formality: number | null;
   status: string;
+  imageId?: string;
   wearCount: number;
   lastWornAt: string | null;
 }
@@ -76,6 +93,19 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
   let prisma: PrismaClient;
   let contextInterpreterResult: InterpretedContext | Error;
   let outfitStylistResult: OutfitStylistRecommendationCandidate[] | OutfitStylistFailedError;
+  let garmentAnalyzerResult:
+    | {
+        category: GarmentCategory;
+        subcategory: GarmentSubcategory | null;
+        primaryColor: string;
+        secondaryColors: string[];
+        pattern: GarmentPattern | null;
+        fit: GarmentFit | null;
+        estimatedMaterial: GarmentMaterial | null;
+        formality: number | null;
+      }
+    | GarmentAnalysisFailedError;
+  const objectStorage = new IntegrationObjectStorage();
 
   beforeAll(async () => {
     container = await new GenericContainer("postgres:16-alpine")
@@ -109,6 +139,8 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     process.env.AUTH_BOOTSTRAP_RATE_LIMIT_MAX = "100";
     process.env.AUTH_LOGIN_RATE_LIMIT_MAX = "100";
     process.env.AUTH_REFRESH_RATE_LIMIT_MAX = "100";
+    process.env.AI_VISION_MODEL = "test-vision-model";
+    process.env.GARMENT_IMAGE_MAX_SIZE_MB = "8";
     execFileSync("pnpm", ["prisma", "migrate", "deploy"], {
       cwd: rootDir,
       env: { ...process.env, DATABASE_URL: databaseUrl },
@@ -140,6 +172,18 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
           return outfitStylistResult;
         }
       } satisfies OutfitStylistPort)
+      .overrideProvider(GARMENT_ANALYZER)
+      .useValue({
+        analyze: async () => {
+          if (garmentAnalyzerResult instanceof GarmentAnalysisFailedError) {
+            throw garmentAnalyzerResult;
+          }
+
+          return garmentAnalyzerResult;
+        }
+      } satisfies GarmentAnalyzerPort)
+      .overrideProvider(OBJECT_STORAGE)
+      .useValue(objectStorage satisfies ObjectStoragePort)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -163,10 +207,22 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     process.env.AUTH_REFRESH_RATE_LIMIT_WINDOW_SECONDS = "60";
     contextInterpreterResult = { activities: [{ type: ActivityType.GYM, time: "17:00" }] };
     outfitStylistResult = [];
+    garmentAnalyzerResult = {
+      category: GarmentCategory.TOP,
+      subcategory: GarmentSubcategory.T_SHIRT,
+      primaryColor: "CREAM",
+      secondaryColors: ["BLACK"],
+      pattern: GarmentPattern.SOLID,
+      fit: GarmentFit.REGULAR,
+      estimatedMaterial: GarmentMaterial.COTTON,
+      formality: 2
+    };
+    objectStorage.clear();
     await prisma.outfitFeedback.deleteMany();
     await prisma.garmentUsageEvent.deleteMany();
     await prisma.outfitItem.deleteMany();
     await prisma.outfit.deleteMany();
+    await prisma.garmentImage.deleteMany();
     await prisma.garment.deleteMany();
     await prisma.authSession.deleteMany();
     await prisma.userCredential.deleteMany();
@@ -440,6 +496,110 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
 
     await expect(prisma.garmentUsageEvent.count({ where: { outfitId: outfit.id } })).resolves.toBe(3);
     await expectWearCount(top.id, 1);
+  });
+
+  it("uploads, analyzes, confirms, associates, and serves a garment image", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+
+    const upload = await uploadImage(auth.accessToken, "image/jpeg");
+
+    const analysis = await request(app.getHttpServer())
+      .post(`/api/v1/garment-images/${upload.id}/analyze`)
+      .set(authHeader(auth.accessToken))
+      .send({})
+      .expect(200)
+      .then((response) => response.body as Record<string, unknown>);
+
+    expect(analysis).toMatchObject({
+      category: "TOP",
+      subcategory: "T_SHIRT",
+      primaryColor: "CREAM",
+      secondaryColors: ["BLACK"],
+      pattern: "SOLID",
+      fit: "REGULAR",
+      estimatedMaterial: "COTTON",
+      formality: 2
+    });
+    await expect(prisma.garment.count()).resolves.toBe(0);
+
+    const garment = await request(app.getHttpServer())
+      .post("/api/v1/garments")
+      .set(authHeader(auth.accessToken))
+      .send({ ...analysis, status: "CLEAN_AVAILABLE", imageId: upload.id, name: "Cream tee" })
+      .expect(201)
+      .then((response) => response.body as GarmentResponse);
+
+    expect(garment).toMatchObject({
+      category: "TOP",
+      primaryColor: "CREAM",
+      imageId: upload.id,
+      subcategory: "T_SHIRT"
+    });
+    await expect(prisma.garmentImage.findUniqueOrThrow({ where: { id: upload.id } })).resolves.toMatchObject({ garmentId: garment.id });
+
+    const garments = await request(app.getHttpServer())
+      .get("/api/v1/garments")
+      .set(authHeader(auth.accessToken))
+      .expect(200)
+      .then((response) => response.body as GarmentResponse[]);
+    expect(garments[0]?.imageId).toBe(upload.id);
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/garment-images/${upload.id}`)
+      .set(authHeader(auth.accessToken))
+      .expect(200)
+      .expect("content-type", /image\/jpeg/);
+  });
+
+  it("rejects invalid or unauthenticated garment image uploads", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+
+    await request(app.getHttpServer())
+      .post("/api/v1/garment-images")
+      .attach("image", Buffer.from([1, 2, 3]), { filename: "garment.txt", contentType: "text/plain" })
+      .expect(401);
+
+    await request(app.getHttpServer())
+      .post("/api/v1/garment-images")
+      .set(authHeader(auth.accessToken))
+      .attach("image", Buffer.from([1, 2, 3]), { filename: "garment.txt", contentType: "text/plain" })
+      .expect(400);
+  });
+
+  it("protects garment image ownership and provider failures", async () => {
+    const userA = await createAuthenticatedUser("User A", "user-a@example.com");
+    const { user: userB } = await createHousehold("Other Home", "User B");
+    await seedCredentials(userB.id, "user-b@example.com", "correct-password");
+    const userBAuth = await login("user-b@example.com");
+    const uploadB = await uploadImage(userBAuth.accessToken, "image/png");
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/garment-images/${uploadB.id}/analyze`)
+      .set(authHeader(userA.auth.accessToken))
+      .send({})
+      .expect(403);
+
+    await request(app.getHttpServer()).get(`/api/v1/garment-images/${uploadB.id}`).set(authHeader(userA.auth.accessToken)).expect(403);
+
+    await request(app.getHttpServer())
+      .post("/api/v1/garments")
+      .set(authHeader(userA.auth.accessToken))
+      .send({ category: "TOP", primaryColor: "BLACK", imageId: uploadB.id })
+      .expect(403);
+
+    garmentAnalyzerResult = new GarmentAnalysisFailedError();
+    const uploadA = await uploadImage(userA.auth.accessToken, "image/webp");
+    await request(app.getHttpServer())
+      .post(`/api/v1/garment-images/${uploadA.id}/analyze`)
+      .set(authHeader(userA.auth.accessToken))
+      .send({})
+      .expect(503);
+
+    await request(app.getHttpServer())
+      .post("/api/v1/garment-images/00000000-0000-0000-0000-000000000000/analyze")
+      .set(authHeader(userA.auth.accessToken))
+      .send({})
+      .expect(404);
   });
 
   it("does not expose USER_B garments to USER_A", async () => {
@@ -786,6 +946,16 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       .then((response) => response.body as GarmentResponse);
   }
 
+  async function uploadImage(accessToken: string, mimeType: "image/jpeg" | "image/png" | "image/webp") {
+    const extension = mimeType.split("/")[1];
+    return request(app.getHttpServer())
+      .post("/api/v1/garment-images")
+      .set(authHeader(accessToken))
+      .attach("image", Buffer.from([1, 2, 3]), { filename: `garment.${extension}`, contentType: mimeType })
+      .expect(201)
+      .then((response) => response.body as { id: string; status: "UPLOADED" });
+  }
+
   async function createDeterministicOutfit(accessToken: string): Promise<OutfitResponse> {
     await createGarment(accessToken, "TOP", "black");
     await createGarment(accessToken, "BOTTOM", "indigo");
@@ -811,4 +981,27 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
 
 function authHeader(accessToken: string) {
   return { Authorization: `Bearer ${accessToken}` };
+}
+
+class IntegrationObjectStorage implements ObjectStoragePort {
+  private readonly objects = new Map<string, { data: Uint8Array; mimeType: string }>();
+
+  clear(): void {
+    this.objects.clear();
+  }
+
+  async storeGarmentImage(input: { userId: string; content: Uint8Array; mimeType: string }) {
+    const objectKey = `users/${input.userId}/garment-images/${this.objects.size + 1}`;
+    this.objects.set(objectKey, { data: input.content, mimeType: input.mimeType });
+    return { objectKey };
+  }
+
+  async readObject(objectKey: string) {
+    const object = this.objects.get(objectKey);
+    if (!object) {
+      throw new Error("Object not found.");
+    }
+
+    return object;
+  }
 }

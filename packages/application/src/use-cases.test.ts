@@ -5,7 +5,12 @@ import {
   ClosetUser,
   Garment,
   GarmentCategory,
+  GarmentFit,
+  GarmentImage,
+  GarmentMaterial,
+  GarmentPattern,
   GarmentStatus,
+  GarmentSubcategory,
   GarmentUsageEvent,
   Household,
   Outfit,
@@ -23,6 +28,14 @@ import {
   OutfitStylistPort,
   OutfitStylistRecommendationCandidate
 } from "./outfit-stylist.js";
+import {
+  AnalyzeGarmentImageUseCase,
+  GarmentAnalysis,
+  GarmentAnalysisFailedError,
+  GarmentAnalyzerPort,
+  ObjectStoragePort,
+  UploadGarmentImageUseCase
+} from "./garment-analyzer.js";
 import {
   ConfirmOutfitUsageUseCase,
   CreateGarmentUseCase,
@@ -88,10 +101,19 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
     }
   };
   garments = {
-    create: async (input: Pick<Garment, "userId" | "category" | "primaryColor" | "status" | "name">) => {
+    create: async (
+      input: Pick<Garment, "userId" | "category" | "primaryColor" | "status" | "name"> &
+        Partial<Pick<Garment, "secondaryColors" | "subcategory" | "pattern" | "fit" | "estimatedMaterial" | "formality">>
+    ) => {
       const now = new Date("2026-08-23T00:00:00.000Z");
       const row: Garment = {
         id: `garment-${this.garmentRows.size + 1}`,
+        secondaryColors: input.secondaryColors ?? [],
+        subcategory: input.subcategory ?? null,
+        pattern: input.pattern ?? null,
+        fit: input.fit ?? null,
+        estimatedMaterial: input.estimatedMaterial ?? null,
+        formality: input.formality ?? null,
         wearCount: 0,
         lastWornAt: null,
         createdAt: now,
@@ -157,6 +179,33 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
     },
     findByOutfitId: async (outfitId: string) => [...this.usageEventRows.values()].filter((event) => event.outfitId === outfitId)
   };
+  garmentImages = {
+    create: async (input: { userId: string; objectKey: string; mimeType: string; size: number }) => {
+      const row: GarmentImage = {
+        id: `image-${this.garmentImageRows.size + 1}`,
+        garmentId: null,
+        createdAt: new Date("2026-08-23T00:00:00.000Z"),
+        ...input
+      };
+      this.garmentImageRows.set(row.id, row);
+      return row;
+    },
+    findById: async (id: string) => this.garmentImageRows.get(id) ?? null,
+    linkToGarment: async (input: { imageId: string; garmentId: string }) => {
+      const image = this.garmentImageRows.get(input.imageId);
+      if (!image) {
+        throw new Error("Garment image not found.");
+      }
+
+      const linked = { ...image, garmentId: input.garmentId };
+      this.garmentImageRows.set(linked.id, linked);
+      const garment = this.garmentRows.get(input.garmentId);
+      if (garment) {
+        this.garmentRows.set(garment.id, { ...garment, imageId: linked.id });
+      }
+      return linked;
+    }
+  };
   outfitFeedback = {
     create: async (input: { outfitId: string; userId: string; decision: OutfitFeedbackDecision; reason: string | null }) => {
       const row: OutfitFeedback = {
@@ -175,6 +224,7 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
   userCredentialRows = new Map<string, UserCredential>();
   authSessionRows = new Map<string, AuthSession>();
   garmentRows = new Map<string, Garment>();
+  garmentImageRows = new Map<string, GarmentImage>();
   outfitRows = new Map<string, Outfit>();
   usageEventRows = new Map<string, GarmentUsageEvent>();
   outfitFeedbackRows = new Map<string, OutfitFeedback>();
@@ -203,6 +253,164 @@ describe("MVP use cases", () => {
 
     expect(garment.userId).toBe("user-1");
     expect(garment.status).toBe(GarmentStatus.CLEAN_AVAILABLE);
+  });
+
+  it("uploads a valid garment image without creating a garment", async () => {
+    const storage = new FakeObjectStorage();
+    const image = await new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 10 }).execute({
+      userId: "user-1",
+      content: new Uint8Array([1, 2, 3]),
+      mimeType: "image/jpeg"
+    });
+
+    expect(image.userId).toBe("user-1");
+    expect(image.garmentId).toBeNull();
+    expect(ports.garmentRows.size).toBe(0);
+  });
+
+  it("rejects invalid garment image uploads", async () => {
+    const storage = new FakeObjectStorage();
+
+    await expect(
+      new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 10 }).execute({
+        userId: "user-1",
+        content: new Uint8Array(),
+        mimeType: "image/jpeg"
+      })
+    ).rejects.toThrow("Garment image is required.");
+
+    await expect(
+      new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 10 }).execute({
+        userId: "user-1",
+        content: new Uint8Array([1]),
+        mimeType: "text/plain"
+      })
+    ).rejects.toThrow("Unsupported garment image MIME type.");
+
+    await expect(
+      new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 2 }).execute({
+        userId: "user-1",
+        content: new Uint8Array([1, 2, 3]),
+        mimeType: "image/png"
+      })
+    ).rejects.toThrow("Garment image is too large.");
+  });
+
+  it("analyzes a garment image into validated proposed metadata", async () => {
+    const storage = new FakeObjectStorage();
+    const image = await new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 10 }).execute({
+      userId: "user-1",
+      content: new Uint8Array([1, 2, 3]),
+      mimeType: "image/png"
+    });
+
+    const analysis = await new AnalyzeGarmentImageUseCase(
+      ports,
+      storage,
+      new FakeGarmentAnalyzer({
+        category: GarmentCategory.TOP,
+        subcategory: GarmentSubcategory.T_SHIRT,
+        primaryColor: "cream",
+        secondaryColors: ["black"],
+        pattern: GarmentPattern.SOLID,
+        fit: GarmentFit.REGULAR,
+        estimatedMaterial: GarmentMaterial.COTTON,
+        formality: 2
+      })
+    ).execute({ userId: "user-1", imageId: image.id });
+
+    expect(analysis).toMatchObject({
+      category: GarmentCategory.TOP,
+      primaryColor: "CREAM",
+      secondaryColors: ["BLACK"]
+    });
+    expect(ports.garmentRows.size).toBe(0);
+  });
+
+  it("rejects malformed or invalid garment analysis output", async () => {
+    const storage = new FakeObjectStorage();
+    const image = await new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 10 }).execute({
+      userId: "user-1",
+      content: new Uint8Array([1, 2, 3]),
+      mimeType: "image/webp"
+    });
+
+    await expect(
+      new AnalyzeGarmentImageUseCase(ports, storage, new FakeGarmentAnalyzer({ category: "HAT" } as unknown as GarmentAnalysis)).execute({
+        userId: "user-1",
+        imageId: image.id
+      })
+    ).rejects.toThrow(GarmentAnalysisFailedError);
+  });
+
+  it("rejects analysis for a missing image or another user's image", async () => {
+    const storage = new FakeObjectStorage();
+    await expect(
+      new AnalyzeGarmentImageUseCase(ports, storage, new FakeGarmentAnalyzer(defaultAnalysis())).execute({
+        userId: "user-1",
+        imageId: "missing"
+      })
+    ).rejects.toThrow("Garment image not found.");
+
+    ports.userRows.set("user-2", { id: "user-2", householdId: "household-1", displayName: "Other", createdAt: new Date() });
+    const image = await new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 10 }).execute({
+      userId: "user-2",
+      content: new Uint8Array([1, 2, 3]),
+      mimeType: "image/jpeg"
+    });
+
+    await expect(
+      new AnalyzeGarmentImageUseCase(ports, storage, new FakeGarmentAnalyzer(defaultAnalysis())).execute({
+        userId: "user-1",
+        imageId: image.id
+      })
+    ).rejects.toThrow("Garment image access is forbidden.");
+  });
+
+  it("confirms assisted garment registration and links the image atomically", async () => {
+    const image = await ports.garmentImages.create({
+      userId: "user-1",
+      objectKey: "users/user-1/garment-images/image.jpg",
+      mimeType: "image/jpeg",
+      size: 3
+    });
+
+    const garment = await new CreateGarmentUseCase(ports).execute({
+      userId: "user-1",
+      imageId: image.id,
+      category: GarmentCategory.TOP,
+      primaryColor: "cream",
+      secondaryColors: ["black"],
+      subcategory: GarmentSubcategory.T_SHIRT,
+      pattern: GarmentPattern.SOLID,
+      fit: GarmentFit.REGULAR,
+      estimatedMaterial: GarmentMaterial.COTTON,
+      formality: 2
+    });
+
+    expect(garment.primaryColor).toBe("CREAM");
+    expect(garment.imageId).toBe(image.id);
+    expect(ports.garmentImageRows.get(image.id)?.garmentId).toBe(garment.id);
+    expect(ports.garmentRows.get(garment.id)?.imageId).toBe(image.id);
+  });
+
+  it("rejects linking another user's image during garment creation", async () => {
+    ports.userRows.set("user-2", { id: "user-2", householdId: "household-1", displayName: "Other", createdAt: new Date() });
+    const image = await ports.garmentImages.create({
+      userId: "user-2",
+      objectKey: "users/user-2/garment-images/image.jpg",
+      mimeType: "image/jpeg",
+      size: 3
+    });
+
+    await expect(
+      new CreateGarmentUseCase(ports).execute({
+        userId: "user-1",
+        imageId: image.id,
+        category: GarmentCategory.TOP,
+        primaryColor: "black"
+      })
+    ).rejects.toThrow("Garment image access is forbidden.");
   });
 
   it("generates a basic outfit only from eligible garments", async () => {
@@ -470,6 +678,50 @@ class FakeOutfitStylist implements OutfitStylistPort {
 
     return this.result;
   }
+}
+
+class FakeObjectStorage implements ObjectStoragePort {
+  private readonly objects = new Map<string, { data: Uint8Array; mimeType: string }>();
+
+  async storeGarmentImage(input: { userId: string; content: Uint8Array; mimeType: string }) {
+    const objectKey = `users/${input.userId}/garment-images/${this.objects.size + 1}`;
+    this.objects.set(objectKey, { data: input.content, mimeType: input.mimeType });
+    return { objectKey };
+  }
+
+  async readObject(objectKey: string) {
+    const object = this.objects.get(objectKey);
+    if (!object) {
+      throw new Error("Object not found.");
+    }
+
+    return object;
+  }
+}
+
+class FakeGarmentAnalyzer implements GarmentAnalyzerPort {
+  constructor(private readonly result: GarmentAnalysis | Error) {}
+
+  async analyze(): Promise<GarmentAnalysis> {
+    if (this.result instanceof Error) {
+      throw this.result;
+    }
+
+    return this.result;
+  }
+}
+
+function defaultAnalysis(): GarmentAnalysis {
+  return {
+    category: GarmentCategory.TOP,
+    subcategory: GarmentSubcategory.T_SHIRT,
+    primaryColor: "BLACK",
+    secondaryColors: [],
+    pattern: GarmentPattern.SOLID,
+    fit: GarmentFit.REGULAR,
+    estimatedMaterial: GarmentMaterial.COTTON,
+    formality: 2
+  };
 }
 
 async function createBasicEligibleGarments(ports: InMemoryPorts) {

@@ -11,7 +11,24 @@ abstract interface class WardrobeRepository {
     required String primaryColor,
     required String status,
     String? name,
+    List<String> secondaryColors = const [],
+    String? subcategory,
+    String? pattern,
+    String? fit,
+    String? estimatedMaterial,
+    int? formality,
+    String? imageId,
   });
+
+  Future<GarmentImageUpload> uploadGarmentImage({
+    required List<int> bytes,
+    required String filename,
+    required String mimeType,
+  });
+
+  Future<GarmentAnalysis> analyzeGarmentImage(String imageId);
+
+  Future<List<int>> fetchGarmentImage(String imageId);
 
   Future<OutfitRecommendationsResult> generateOutfitRecommendations({
     InterpretedContext? context,
@@ -44,18 +61,68 @@ class ApiWardrobeRepository implements WardrobeRepository {
     required String primaryColor,
     required String status,
     String? name,
+    List<String> secondaryColors = const [],
+    String? subcategory,
+    String? pattern,
+    String? fit,
+    String? estimatedMaterial,
+    int? formality,
+    String? imageId,
   }) async {
-    final row = await _apiClient.postObject(
-      '/garments',
-      body: {
-        'category': category,
-        'primaryColor': primaryColor,
-        'status': status,
-        if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
-      },
-    );
+    final body = <String, Object?>{
+      'category': category,
+      'primaryColor': primaryColor,
+      'secondaryColors': secondaryColors,
+      'status': status,
+    };
+    void addOptional(String key, Object? value) {
+      if (value != null) {
+        body[key] = value;
+      }
+    }
+
+    addOptional('subcategory', subcategory);
+    addOptional('pattern', pattern);
+    addOptional('fit', fit);
+    addOptional('estimatedMaterial', estimatedMaterial);
+    addOptional('formality', formality);
+    addOptional('imageId', imageId);
+    if (name != null && name.trim().isNotEmpty) {
+      body['name'] = name.trim();
+    }
+
+    final row = await _apiClient.postObject('/garments', body: body);
 
     return Garment.fromJson(row);
+  }
+
+  @override
+  Future<GarmentImageUpload> uploadGarmentImage({
+    required List<int> bytes,
+    required String filename,
+    required String mimeType,
+  }) async {
+    final row = await _apiClient.postMultipartObject(
+      '/garment-images',
+      fieldName: 'image',
+      bytes: bytes,
+      filename: filename,
+      contentType: mimeType,
+    );
+
+    return GarmentImageUpload.fromJson(row);
+  }
+
+  @override
+  Future<GarmentAnalysis> analyzeGarmentImage(String imageId) async {
+    final row = await _apiClient.postObject('/garment-images/$imageId/analyze');
+
+    return GarmentAnalysis.fromJson(row);
+  }
+
+  @override
+  Future<List<int>> fetchGarmentImage(String imageId) {
+    return _apiClient.getBytes('/garment-images/$imageId');
   }
 
   @override

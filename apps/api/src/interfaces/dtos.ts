@@ -1,7 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
-import { IsArray, IsEnum, IsObject, IsOptional, IsString, MaxLength, ValidateNested } from "class-validator";
-import { ActivityType, GarmentCategory, GarmentStatus, OutfitFeedbackDecision } from "@closet-ai/domain";
+import { IsArray, IsEnum, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from "class-validator";
+import {
+  ActivityType,
+  GarmentCategory,
+  GarmentFit,
+  GarmentMaterial,
+  GarmentPattern,
+  GarmentStatus,
+  GarmentSubcategory,
+  OutfitFeedbackDecision
+} from "@closet-ai/domain";
 
 export class CreateHouseholdDto {
   @ApiProperty()
@@ -28,6 +37,40 @@ export class CreateGarmentDto {
   @IsString()
   primaryColor!: string;
 
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  secondaryColors?: string[];
+
+  @ApiPropertyOptional({ enum: GarmentSubcategory, nullable: true })
+  @IsOptional()
+  @IsEnum(GarmentSubcategory)
+  subcategory?: GarmentSubcategory | null;
+
+  @ApiPropertyOptional({ enum: GarmentPattern, nullable: true })
+  @IsOptional()
+  @IsEnum(GarmentPattern)
+  pattern?: GarmentPattern | null;
+
+  @ApiPropertyOptional({ enum: GarmentFit, nullable: true })
+  @IsOptional()
+  @IsEnum(GarmentFit)
+  fit?: GarmentFit | null;
+
+  @ApiPropertyOptional({ enum: GarmentMaterial, nullable: true })
+  @IsOptional()
+  @IsEnum(GarmentMaterial)
+  estimatedMaterial?: GarmentMaterial | null;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 5, nullable: true })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  formality?: number | null;
+
   @ApiPropertyOptional({ enum: GarmentStatus })
   @IsOptional()
   @IsEnum(GarmentStatus)
@@ -37,6 +80,11 @@ export class CreateGarmentDto {
   @IsOptional()
   @IsString()
   name?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  imageId?: string;
 }
 
 export class ConfirmOutfitUsageDto {
@@ -137,11 +185,32 @@ export class GarmentResponseDto {
   @ApiProperty()
   primaryColor!: string;
 
+  @ApiProperty({ type: [String] })
+  secondaryColors!: string[];
+
+  @ApiProperty({ enum: GarmentSubcategory, nullable: true })
+  subcategory!: GarmentSubcategory | null;
+
+  @ApiProperty({ enum: GarmentPattern, nullable: true })
+  pattern!: GarmentPattern | null;
+
+  @ApiProperty({ enum: GarmentFit, nullable: true })
+  fit!: GarmentFit | null;
+
+  @ApiProperty({ enum: GarmentMaterial, nullable: true })
+  estimatedMaterial!: GarmentMaterial | null;
+
+  @ApiProperty({ nullable: true })
+  formality!: number | null;
+
   @ApiProperty({ enum: GarmentStatus })
   status!: GarmentStatus;
 
   @ApiPropertyOptional()
   name?: string;
+
+  @ApiPropertyOptional()
+  imageId?: string;
 
   @ApiProperty()
   wearCount!: number;
@@ -154,6 +223,40 @@ export class GarmentResponseDto {
 
   @ApiProperty()
   updatedAt!: Date;
+}
+
+export class GarmentImageUploadResponseDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty({ enum: ["UPLOADED"] })
+  status!: "UPLOADED";
+}
+
+export class GarmentAnalysisResponseDto {
+  @ApiProperty({ enum: GarmentCategory })
+  category!: GarmentCategory;
+
+  @ApiProperty({ enum: GarmentSubcategory, nullable: true })
+  subcategory!: GarmentSubcategory | null;
+
+  @ApiProperty()
+  primaryColor!: string;
+
+  @ApiProperty({ type: [String] })
+  secondaryColors!: string[];
+
+  @ApiProperty({ enum: GarmentPattern, nullable: true })
+  pattern!: GarmentPattern | null;
+
+  @ApiProperty({ enum: GarmentFit, nullable: true })
+  fit!: GarmentFit | null;
+
+  @ApiProperty({ enum: GarmentMaterial, nullable: true })
+  estimatedMaterial!: GarmentMaterial | null;
+
+  @ApiProperty({ nullable: true, minimum: 1, maximum: 5 })
+  formality!: number | null;
 }
 
 export class OutfitItemResponseDto {

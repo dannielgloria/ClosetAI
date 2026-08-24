@@ -3,6 +3,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import {
   ApplicationPorts,
   AuthSessionRepositoryPort,
+  GarmentImageRepositoryPort,
   GarmentRepositoryPort,
   HouseholdRepositoryPort,
   OutfitFeedbackRepositoryPort,
@@ -17,6 +18,7 @@ import { PrismaService } from "./prisma.service.js";
 import {
   mapAuthSession,
   mapGarment,
+  mapGarmentImage,
   mapHousehold,
   mapOutfit,
   mapOutfitFeedback,
@@ -39,6 +41,7 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
       userCredentials: this.createUserCredentialRepository(db),
       authSessions: this.createAuthSessionRepository(db),
       garments: this.createGarmentRepository(db),
+      garmentImages: this.createGarmentImageRepository(db),
       outfits: this.createOutfitRepository(db),
       usageEvents: this.createUsageEventRepository(db),
       outfitFeedback: this.createOutfitFeedbackRepository(db)
@@ -167,6 +170,12 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
               userId: input.userId,
               category: input.category,
               primaryColor: input.primaryColor,
+              secondaryColors: input.secondaryColors ?? [],
+              subcategory: input.subcategory ?? null,
+              pattern: input.pattern ?? null,
+              fit: input.fit ?? null,
+              estimatedMaterial: input.estimatedMaterial ?? null,
+              formality: input.formality ?? null,
               status: input.status,
               name: input.name
             }
@@ -176,6 +185,7 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
         (
           await db.garment.findMany({
             where: { userId },
+            include: { images: { orderBy: { createdAt: "asc" }, take: 1 } },
             orderBy: [{ category: "asc" }, { createdAt: "asc" }]
           })
         ).map(mapGarment),
@@ -183,10 +193,17 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
         (
           await db.garment.findMany({
             where: { userId, status: { in: [GarmentStatus.CLEAN_AVAILABLE, GarmentStatus.WORN_REUSABLE] } },
+            include: { images: { orderBy: { createdAt: "asc" }, take: 1 } },
             orderBy: [{ category: "asc" }, { createdAt: "asc" }]
           })
         ).map(mapGarment),
-      findByIds: async (ids) => (await db.garment.findMany({ where: { id: { in: ids } } })).map(mapGarment),
+      findByIds: async (ids) =>
+        (
+          await db.garment.findMany({
+            where: { id: { in: ids } },
+            include: { images: { orderBy: { createdAt: "asc" }, take: 1 } }
+          })
+        ).map(mapGarment),
       save: async (garment) =>
         mapGarment(
           await db.garment.update({
@@ -196,6 +213,33 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
               wearCount: garment.wearCount,
               lastWornAt: garment.lastWornAt
             }
+          })
+        )
+    };
+  }
+
+  private createGarmentImageRepository(db: DbClient): GarmentImageRepositoryPort {
+    return {
+      create: async (input) =>
+        mapGarmentImage(
+          await db.garmentImage.create({
+            data: {
+              userId: input.userId,
+              objectKey: input.objectKey,
+              mimeType: input.mimeType,
+              size: input.size
+            }
+          })
+        ),
+      findById: async (id) => {
+        const row = await db.garmentImage.findUnique({ where: { id } });
+        return row ? mapGarmentImage(row) : null;
+      },
+      linkToGarment: async (input) =>
+        mapGarmentImage(
+          await db.garmentImage.update({
+            where: { id: input.imageId },
+            data: { garmentId: input.garmentId }
           })
         )
     };

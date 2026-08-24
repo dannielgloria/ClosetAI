@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'application/auth_controller.dart';
 import 'application/context_controller.dart';
@@ -29,8 +32,51 @@ void main() {
       authController: authController,
       wardrobeRepository: ApiWardrobeRepository(apiClient),
       contextRepository: ApiContextRepository(apiClient),
+      pickGarmentImage: pickGarmentImageWithImagePicker,
     ),
   );
+}
+
+class PickedGarmentImage {
+  const PickedGarmentImage({
+    required this.bytes,
+    required this.filename,
+    required this.mimeType,
+  });
+
+  final List<int> bytes;
+  final String filename;
+  final String mimeType;
+}
+
+typedef PickGarmentImage = Future<PickedGarmentImage?> Function(
+  ImageSource source,
+);
+
+Future<PickedGarmentImage?> pickGarmentImageWithImagePicker(
+  ImageSource source,
+) async {
+  final file = await ImagePicker().pickImage(source: source, imageQuality: 85);
+  if (file == null) {
+    return null;
+  }
+
+  return PickedGarmentImage(
+    bytes: await file.readAsBytes(),
+    filename: file.name,
+    mimeType: file.mimeType ?? _mimeTypeFromFilename(file.name),
+  );
+}
+
+String _mimeTypeFromFilename(String filename) {
+  final lower = filename.toLowerCase();
+  if (lower.endsWith('.png')) {
+    return 'image/png';
+  }
+  if (lower.endsWith('.webp')) {
+    return 'image/webp';
+  }
+  return 'image/jpeg';
 }
 
 class ClosetAiApp extends StatelessWidget {
@@ -38,12 +84,14 @@ class ClosetAiApp extends StatelessWidget {
     required this.authController,
     required this.wardrobeRepository,
     required this.contextRepository,
+    this.pickGarmentImage,
     super.key,
   });
 
   final AuthController authController;
   final WardrobeRepository wardrobeRepository;
   final ContextRepository contextRepository;
+  final PickGarmentImage? pickGarmentImage;
 
   @override
   Widget build(BuildContext context) {
@@ -63,6 +111,7 @@ class ClosetAiApp extends StatelessWidget {
         authController: authController,
         wardrobeRepository: wardrobeRepository,
         contextRepository: contextRepository,
+        pickGarmentImage: pickGarmentImage ?? pickGarmentImageWithImagePicker,
       ),
     );
   }
@@ -73,12 +122,14 @@ class AuthenticatedAppShell extends StatefulWidget {
     required this.authController,
     required this.wardrobeRepository,
     required this.contextRepository,
+    required this.pickGarmentImage,
     super.key,
   });
 
   final AuthController authController;
   final WardrobeRepository wardrobeRepository;
   final ContextRepository contextRepository;
+  final PickGarmentImage pickGarmentImage;
 
   @override
   State<AuthenticatedAppShell> createState() => _AuthenticatedAppShellState();
@@ -130,6 +181,7 @@ class _AuthenticatedAppShellState extends State<AuthenticatedAppShell> {
           authController: _authController,
           controller: _wardrobeController!,
           contextController: _contextController!,
+          pickGarmentImage: widget.pickGarmentImage,
         );
     }
   }
@@ -226,12 +278,14 @@ class WardrobeHomeScreen extends StatefulWidget {
     required this.authController,
     required this.controller,
     required this.contextController,
+    required this.pickGarmentImage,
     super.key,
   });
 
   final AuthController authController;
   final WardrobeController controller;
   final ContextController contextController;
+  final PickGarmentImage pickGarmentImage;
 
   @override
   State<WardrobeHomeScreen> createState() => _WardrobeHomeScreenState();
@@ -310,6 +364,22 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
                   icon: const Icon(Icons.add),
                   tooltip: 'Register garment',
                 ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  onPressed: _controller.isLoading
+                      ? null
+                      : () => _pickAnalyzeAndReview(ImageSource.camera),
+                  icon: const Icon(Icons.photo_camera_outlined),
+                  tooltip: 'Take garment photo',
+                ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  onPressed: _controller.isLoading
+                      ? null
+                      : () => _pickAnalyzeAndReview(ImageSource.gallery),
+                  icon: const Icon(Icons.photo_library_outlined),
+                  tooltip: 'Choose garment photo',
+                ),
               ],
             ),
             const SizedBox(height: 20),
@@ -332,7 +402,10 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
               const Text('No garments loaded.')
             else
               for (final garment in _controller.garments)
-                _GarmentTile(garment: garment),
+                _GarmentTile(
+                  garment: garment,
+                  fetchImage: _controller.fetchGarmentImage,
+                ),
             const SizedBox(height: 28),
             Text(
               'Context',
@@ -482,6 +555,50 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
     );
   }
 
+  Future<void> _pickAnalyzeAndReview(ImageSource source) async {
+    final image = await widget.pickGarmentImage(source);
+    if (image == null) {
+      return;
+    }
+
+    await _controller.uploadAndAnalyzeGarmentImage(
+      bytes: image.bytes,
+      filename: image.filename,
+      mimeType: image.mimeType,
+    );
+
+    if (!mounted || _controller.proposedGarment == null) {
+      return;
+    }
+
+    await _showReviewGarmentDialog(_controller.proposedGarment!);
+  }
+
+  Future<void> _showReviewGarmentDialog(GarmentAnalysis analysis) async {
+    final result = await showDialog<_CreateGarmentInput>(
+      context: context,
+      builder: (context) => _CreateGarmentDialog(initialAnalysis: analysis),
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    await _controller.createGarment(
+      category: result.category,
+      primaryColor: result.primaryColor,
+      status: result.status,
+      name: result.name,
+      secondaryColors: result.secondaryColors,
+      subcategory: result.subcategory,
+      pattern: result.pattern,
+      fit: result.fit,
+      estimatedMaterial: result.estimatedMaterial,
+      formality: result.formality,
+      imageId: _controller.pendingImageId,
+    );
+  }
+
   Future<void> _submitAcceptedFeedback(String outfitId) {
     return _controller.submitOutfitFeedback(
       outfitId: outfitId,
@@ -539,6 +656,12 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
       primaryColor: result.primaryColor,
       status: result.status,
       name: result.name,
+      secondaryColors: result.secondaryColors,
+      subcategory: result.subcategory,
+      pattern: result.pattern,
+      fit: result.fit,
+      estimatedMaterial: result.estimatedMaterial,
+      formality: result.formality,
     );
   }
 }
@@ -584,9 +707,10 @@ class _RejectedFeedbackDialogState extends State<_RejectedFeedbackDialog> {
 }
 
 class _GarmentTile extends StatelessWidget {
-  const _GarmentTile({required this.garment});
+  const _GarmentTile({required this.garment, required this.fetchImage});
 
   final Garment garment;
+  final Future<List<int>> Function(String imageId) fetchImage;
 
   @override
   Widget build(BuildContext context) {
@@ -596,7 +720,30 @@ class _GarmentTile extends StatelessWidget {
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: const Icon(Icons.checkroom_outlined),
+      leading: garment.imageId == null
+          ? const Icon(Icons.checkroom_outlined)
+          : FutureBuilder<List<int>>(
+              future: fetchImage(garment.imageId!),
+              builder: (context, snapshot) {
+                if (snapshot.hasData) {
+                  return ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Image.memory(
+                      Uint8List.fromList(snapshot.data!),
+                      width: 48,
+                      height: 48,
+                      fit: BoxFit.cover,
+                    ),
+                  );
+                }
+
+                return const SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: Icon(Icons.image_outlined),
+                );
+              },
+            ),
       title: Text(name),
       subtitle: Text(
         '${garment.category} / ${garment.primaryColor} / ${garment.status}',
@@ -611,17 +758,31 @@ class _CreateGarmentInput {
     required this.category,
     required this.primaryColor,
     required this.status,
+    this.secondaryColors = const [],
+    this.subcategory,
+    this.pattern,
+    this.fit,
+    this.estimatedMaterial,
+    this.formality,
     this.name,
   });
 
   final String category;
   final String primaryColor;
   final String status;
+  final List<String> secondaryColors;
+  final String? subcategory;
+  final String? pattern;
+  final String? fit;
+  final String? estimatedMaterial;
+  final int? formality;
   final String? name;
 }
 
 class _CreateGarmentDialog extends StatefulWidget {
-  const _CreateGarmentDialog();
+  const _CreateGarmentDialog({this.initialAnalysis});
+
+  final GarmentAnalysis? initialAnalysis;
 
   @override
   State<_CreateGarmentDialog> createState() => _CreateGarmentDialogState();
@@ -629,21 +790,51 @@ class _CreateGarmentDialog extends StatefulWidget {
 
 class _CreateGarmentDialogState extends State<_CreateGarmentDialog> {
   final _nameController = TextEditingController();
-  final _colorController = TextEditingController(text: 'black');
+  late final TextEditingController _colorController;
+  late final TextEditingController _secondaryColorsController;
+  late final TextEditingController _formalityController;
   String _category = 'TOP';
   String _status = 'CLEAN_AVAILABLE';
+  String? _subcategory;
+  String? _pattern;
+  String? _fit;
+  String? _estimatedMaterial;
+
+  @override
+  void initState() {
+    super.initState();
+    final analysis = widget.initialAnalysis;
+    _category = analysis?.category ?? 'TOP';
+    _subcategory = analysis?.subcategory;
+    _pattern = analysis?.pattern;
+    _fit = analysis?.fit;
+    _estimatedMaterial = analysis?.estimatedMaterial;
+    _colorController = TextEditingController(
+      text: analysis?.primaryColor ?? 'black',
+    );
+    _secondaryColorsController = TextEditingController(
+      text: analysis?.secondaryColors.join(', ') ?? '',
+    );
+    _formalityController = TextEditingController(
+      text: analysis?.formality?.toString() ?? '',
+    );
+  }
 
   @override
   void dispose() {
     _nameController.dispose();
     _colorController.dispose();
+    _secondaryColorsController.dispose();
+    _formalityController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Register garment'),
+      title: Text(
+        widget.initialAnalysis == null ? 'Register garment' : 'Review garment',
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -671,6 +862,81 @@ class _CreateGarmentDialogState extends State<_CreateGarmentDialog> {
             TextField(
               controller: _colorController,
               decoration: const InputDecoration(labelText: 'Primary color'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _secondaryColorsController,
+              decoration: const InputDecoration(labelText: 'Secondary colors'),
+            ),
+            const SizedBox(height: 12),
+            _optionalDropdown(
+              label: 'Subcategory',
+              value: _subcategory,
+              values: const [
+                'T_SHIRT',
+                'SHIRT',
+                'SWEATER',
+                'HOODIE',
+                'JACKET',
+                'JEANS',
+                'TROUSERS',
+                'SHORTS',
+                'DRESS',
+                'SNEAKERS',
+                'BOOTS',
+                'DRESS_SHOES',
+                'UNKNOWN',
+              ],
+              onChanged: (value) => setState(() => _subcategory = value),
+            ),
+            const SizedBox(height: 12),
+            _optionalDropdown(
+              label: 'Pattern',
+              value: _pattern,
+              values: const [
+                'SOLID',
+                'STRIPED',
+                'CHECKED',
+                'PRINTED',
+                'TEXTURED',
+                'UNKNOWN',
+              ],
+              onChanged: (value) => setState(() => _pattern = value),
+            ),
+            const SizedBox(height: 12),
+            _optionalDropdown(
+              label: 'Fit',
+              value: _fit,
+              values: const [
+                'SLIM',
+                'REGULAR',
+                'RELAXED',
+                'OVERSIZED',
+                'UNKNOWN',
+              ],
+              onChanged: (value) => setState(() => _fit = value),
+            ),
+            const SizedBox(height: 12),
+            _optionalDropdown(
+              label: 'Material',
+              value: _estimatedMaterial,
+              values: const [
+                'COTTON',
+                'DENIM',
+                'WOOL',
+                'LINEN',
+                'LEATHER',
+                'SYNTHETIC',
+                'KNIT',
+                'UNKNOWN',
+              ],
+              onChanged: (value) => setState(() => _estimatedMaterial = value),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _formalityController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Formalidad'),
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
@@ -711,6 +977,16 @@ class _CreateGarmentDialogState extends State<_CreateGarmentDialog> {
                 category: _category,
                 primaryColor: _colorController.text.trim(),
                 status: _status,
+                secondaryColors: _secondaryColorsController.text
+                    .split(',')
+                    .map((color) => color.trim())
+                    .where((color) => color.isNotEmpty)
+                    .toList(growable: false),
+                subcategory: _subcategory,
+                pattern: _pattern,
+                fit: _fit,
+                estimatedMaterial: _estimatedMaterial,
+                formality: int.tryParse(_formalityController.text.trim()),
                 name: _nameController.text,
               ),
             );
@@ -718,6 +994,24 @@ class _CreateGarmentDialogState extends State<_CreateGarmentDialog> {
           child: const Text('Save'),
         ),
       ],
+    );
+  }
+
+  Widget _optionalDropdown({
+    required String label,
+    required String? value,
+    required List<String> values,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      decoration: InputDecoration(labelText: label),
+      items: [
+        const DropdownMenuItem(value: null, child: Text('Unknown')),
+        for (final item in values)
+          DropdownMenuItem(value: item, child: Text(item)),
+      ],
+      onChanged: onChanged,
     );
   }
 }

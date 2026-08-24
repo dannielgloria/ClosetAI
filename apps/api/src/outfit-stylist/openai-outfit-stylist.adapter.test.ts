@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ResponseCreateParamsNonStreaming } from "openai/resources/responses/responses";
 import { OutfitStylistFailedError } from "@closet-ai/application";
 import { ActivityType, GarmentCategory, GarmentStatus } from "@closet-ai/domain";
+import { AiConfig } from "../ai/ai-config.js";
 import { OpenAIOutfitStylistAdapter } from "./openai-outfit-stylist.adapter.js";
 
 class FakeOpenAIClient {
@@ -21,19 +22,30 @@ class FakeOpenAIClient {
   };
 }
 
-const config = {
+const config: AiConfig = {
   openAiApiKey: "test-key",
   contextModel: "test-context-model",
   outfitModel: "test-outfit-model",
-  requestTimeoutMs: 5000
+  visionModel: "test-vision-model",
+  requestTimeoutMs: 5000,
+  garmentImageMaxSizeBytes: 8 * 1024 * 1024
+};
+
+const metadata = {
+  subcategory: null,
+  secondaryColors: [],
+  pattern: null,
+  fit: null,
+  estimatedMaterial: null,
+  formality: null
 };
 
 const input = {
   context: { activities: [{ type: ActivityType.CASUAL_DINNER, time: "20:00" }] },
   garments: [
-    { id: "top-1", category: GarmentCategory.TOP, primaryColor: "black", status: GarmentStatus.CLEAN_AVAILABLE, name: "Black tee" },
-    { id: "bottom-1", category: GarmentCategory.BOTTOM, primaryColor: "blue", status: GarmentStatus.CLEAN_AVAILABLE },
-    { id: "footwear-1", category: GarmentCategory.FOOTWEAR, primaryColor: "white", status: GarmentStatus.CLEAN_AVAILABLE }
+    { id: "top-1", category: GarmentCategory.TOP, primaryColor: "black", status: GarmentStatus.CLEAN_AVAILABLE, name: "Black tee", ...metadata },
+    { id: "bottom-1", category: GarmentCategory.BOTTOM, primaryColor: "blue", status: GarmentStatus.CLEAN_AVAILABLE, ...metadata },
+    { id: "footwear-1", category: GarmentCategory.FOOTWEAR, primaryColor: "white", status: GarmentStatus.CLEAN_AVAILABLE, ...metadata }
   ],
   maxRecommendations: 3
 };
@@ -76,7 +88,9 @@ describe("OpenAIOutfitStylistAdapter", () => {
       openAiApiKey: undefined,
       contextModel: "test-context-model",
       outfitModel: undefined,
-      requestTimeoutMs: 5000
+      visionModel: "test-vision-model",
+      requestTimeoutMs: 5000,
+      garmentImageMaxSizeBytes: 8 * 1024 * 1024
     });
 
     await expect(adapter.recommend(input)).rejects.toThrow(OutfitStylistFailedError);

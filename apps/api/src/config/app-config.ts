@@ -39,7 +39,8 @@ export function validateProductionConfig(): void {
     "SETUP_SECRET",
     "OPENAI_API_KEY",
     "AI_CONTEXT_MODEL",
-    "AI_OUTFIT_MODEL"
+    "AI_OUTFIT_MODEL",
+    "AI_VISION_MODEL"
   ];
   const missingOrInsecure = required.filter((name) => {
     const value = process.env[name]?.trim() ?? "";

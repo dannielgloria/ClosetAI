@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { AuthSession, ClosetUser, OutfitFeedback, UserCredential } from "@closet-ai/domain";
+import { AuthSession, ClosetUser, GarmentImage, OutfitFeedback, UserCredential } from "@closet-ai/domain";
 import { ApplicationPorts, UnitOfWorkPort } from "./ports.js";
 import {
   AccessTokenIssuerPort,
@@ -101,6 +101,15 @@ class AuthPorts implements ApplicationPorts, UnitOfWorkPort {
     findAvailableByUserId: async () => [],
     findByIds: async () => [],
     save: async () => {
+      throw new Error("not implemented");
+    }
+  };
+  garmentImages = {
+    create: async () => {
+      throw new Error("not implemented");
+    },
+    findById: async () => null,
+    linkToGarment: async (): Promise<GarmentImage> => {
       throw new Error("not implemented");
     }
   };

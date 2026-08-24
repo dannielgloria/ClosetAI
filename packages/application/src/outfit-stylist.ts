@@ -15,7 +15,13 @@ export const MAX_OUTFIT_RECOMMENDATIONS = 3;
 export interface OutfitStylistGarmentCandidate {
   id: EntityId;
   category: GarmentCategory;
+  subcategory: string | null;
   primaryColor: string;
+  secondaryColors: string[];
+  pattern: string | null;
+  fit: string | null;
+  estimatedMaterial: string | null;
+  formality: number | null;
   status: string;
   name?: string;
 }
@@ -128,7 +134,13 @@ function toStylistCandidate(garment: Garment): OutfitStylistGarmentCandidate {
   return {
     id: garment.id,
     category: garment.category,
+    subcategory: garment.subcategory,
     primaryColor: garment.primaryColor,
+    secondaryColors: garment.secondaryColors,
+    pattern: garment.pattern,
+    fit: garment.fit,
+    estimatedMaterial: garment.estimatedMaterial,
+    formality: garment.formality,
     status: garment.status,
     name: garment.name
   };

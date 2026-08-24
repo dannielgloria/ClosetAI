@@ -29,7 +29,7 @@ export class GarmentsController {
   @ApiUnauthorizedResponse({ description: "Missing, invalid, or revoked access token." })
   async createGarment(@CurrentUser() currentUser: AuthenticatedUser, @Body() body: CreateGarmentDto) {
     try {
-      return await new CreateGarmentUseCase(this.portFactory.create()).execute({ ...body, userId: currentUser.userId });
+      return await new CreateGarmentUseCase(this.portFactory).execute({ ...body, userId: currentUser.userId });
     } catch (error) {
       mapUseCaseError(error);
     }

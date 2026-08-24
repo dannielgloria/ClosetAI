@@ -76,6 +76,35 @@ class ClosetApiClient {
     return decoded;
   }
 
+  Future<Map<String, Object?>> postMultipartObject(
+    String path, {
+    required String fieldName,
+    required List<int> bytes,
+    required String filename,
+    required String contentType,
+    bool authenticated = true,
+  }) async {
+    final response = await _sendMultipart(
+      path,
+      fieldName: fieldName,
+      bytes: bytes,
+      filename: filename,
+      contentType: contentType,
+      authenticated: authenticated,
+    );
+    final decoded = jsonDecode(response);
+
+    if (decoded is! Map<String, Object?>) {
+      throw const FormatException('Expected a JSON object.');
+    }
+
+    return decoded;
+  }
+
+  Future<List<int>> getBytes(String path, {bool authenticated = true}) {
+    return _sendBytes('GET', path, authenticated: authenticated);
+  }
+
   Future<String> _send(
     String method,
     String path, {
@@ -168,6 +197,112 @@ class ClosetApiClient {
       await _tokenStorage?.clear();
       await onSessionExpired?.call();
       return false;
+    }
+  }
+
+  Future<String> _sendMultipart(
+    String path, {
+    required String fieldName,
+    required List<int> bytes,
+    required String filename,
+    required String contentType,
+    required bool authenticated,
+    bool retryOnUnauthorized = true,
+  }) async {
+    final uri = baseUrl.replace(path: '${baseUrl.path}$path');
+    final request = await _httpClient.postUrl(uri);
+    final boundary = 'closet-ai-${DateTime.now().microsecondsSinceEpoch}';
+    request.headers.set(
+      HttpHeaders.contentTypeHeader,
+      'multipart/form-data; boundary=$boundary',
+    );
+    await _authorize(request, authenticated);
+
+    request.write('--$boundary\r\n');
+    request.write(
+      'Content-Disposition: form-data; name="$fieldName"; filename="$filename"\r\n',
+    );
+    request.write('Content-Type: $contentType\r\n\r\n');
+    request.add(bytes);
+    request.write('\r\n--$boundary--\r\n');
+
+    final response = await request.close();
+    final responseBody = await response.transform(utf8.decoder).join();
+
+    if (response.statusCode == HttpStatus.unauthorized &&
+        authenticated &&
+        retryOnUnauthorized &&
+        await _tryRefresh()) {
+      return _sendMultipart(
+        path,
+        fieldName: fieldName,
+        bytes: bytes,
+        filename: filename,
+        contentType: contentType,
+        authenticated: authenticated,
+        retryOnUnauthorized: false,
+      );
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HttpException(
+        'API request failed with ${response.statusCode}: $responseBody',
+        uri: uri,
+      );
+    }
+
+    return responseBody;
+  }
+
+  Future<List<int>> _sendBytes(
+    String method,
+    String path, {
+    required bool authenticated,
+    bool retryOnUnauthorized = true,
+  }) async {
+    final uri = baseUrl.replace(path: '${baseUrl.path}$path');
+    final request = await _httpClient.openUrl(method, uri);
+    await _authorize(request, authenticated);
+
+    final response = await request.close();
+    final chunks = <int>[];
+    await for (final chunk in response) {
+      chunks.addAll(chunk);
+    }
+
+    if (response.statusCode == HttpStatus.unauthorized &&
+        authenticated &&
+        retryOnUnauthorized &&
+        await _tryRefresh()) {
+      return _sendBytes(
+        method,
+        path,
+        authenticated: authenticated,
+        retryOnUnauthorized: false,
+      );
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HttpException(
+        'API request failed with ${response.statusCode}',
+        uri: uri,
+      );
+    }
+
+    return chunks;
+  }
+
+  Future<void> _authorize(HttpClientRequest request, bool authenticated) async {
+    if (!authenticated) {
+      return;
+    }
+
+    final accessToken = await _tokenStorage?.readAccessToken();
+    if (accessToken != null) {
+      request.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer $accessToken',
+      );
     }
   }
 }

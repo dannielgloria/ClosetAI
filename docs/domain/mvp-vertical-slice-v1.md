@@ -44,3 +44,17 @@ delete or invalidate the recommendation.
 
 For MVP v1, duplicate submissions are not silently collapsed because there is
 no idempotency-key convention for this endpoint yet.
+
+## Garment Vision
+
+Uploaded garment photos are private `GarmentImage` records owned by a user.
+Images store an object key and metadata in PostgreSQL; image bytes live in local
+object storage behind `ObjectStoragePort`.
+
+Vision analysis proposes metadata only. It does not create a `Garment`, does not
+change availability, and does not become source of truth until the user confirms
+or edits the proposed fields through the existing garment creation flow.
+
+An uploaded image may temporarily have no `garmentId` if the user analyzes but
+does not confirm registration. Cleanup of old orphan images is deferred to a
+future BullMQ maintenance job.

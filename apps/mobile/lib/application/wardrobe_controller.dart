@@ -16,6 +16,8 @@ class WardrobeController extends ChangeNotifier {
   String? recommendationStrategy;
   List<OutfitRecommendation> recommendations = const [];
   Map<String, String> feedbackByOutfitId = const {};
+  String? pendingImageId;
+  GarmentAnalysis? proposedGarment;
 
   Future<void> loadGarments() async {
     await _run(() async {
@@ -28,6 +30,13 @@ class WardrobeController extends ChangeNotifier {
     required String primaryColor,
     required String status,
     String? name,
+    List<String> secondaryColors = const [],
+    String? subcategory,
+    String? pattern,
+    String? fit,
+    String? estimatedMaterial,
+    int? formality,
+    String? imageId,
   }) async {
     await _run(() async {
       await _repository.createGarment(
@@ -35,9 +44,38 @@ class WardrobeController extends ChangeNotifier {
         primaryColor: primaryColor.trim(),
         status: status,
         name: name,
+        secondaryColors: secondaryColors,
+        subcategory: subcategory,
+        pattern: pattern,
+        fit: fit,
+        estimatedMaterial: estimatedMaterial,
+        formality: formality,
+        imageId: imageId,
       );
+      pendingImageId = null;
+      proposedGarment = null;
       garments = await _repository.listGarments();
     });
+  }
+
+  Future<void> uploadAndAnalyzeGarmentImage({
+    required List<int> bytes,
+    required String filename,
+    required String mimeType,
+  }) async {
+    await _run(() async {
+      final upload = await _repository.uploadGarmentImage(
+        bytes: bytes,
+        filename: filename,
+        mimeType: mimeType,
+      );
+      pendingImageId = upload.id;
+      proposedGarment = await _repository.analyzeGarmentImage(upload.id);
+    });
+  }
+
+  Future<List<int>> fetchGarmentImage(String imageId) {
+    return _repository.fetchGarmentImage(imageId);
   }
 
   Future<void> generateOutfitRecommendations({

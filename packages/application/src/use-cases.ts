@@ -4,7 +4,11 @@ import {
   EntityId,
   Garment,
   GarmentCategory,
+  GarmentFit,
+  GarmentMaterial,
+  GarmentPattern,
   GarmentStatus,
+  GarmentSubcategory,
   markGarmentWorn,
   OutfitFeedbackDecision,
   OutfitStatus,
@@ -34,26 +38,65 @@ export class CreateUserUseCase {
 }
 
 export class CreateGarmentUseCase {
-  constructor(private readonly ports: ApplicationPorts) {}
+  constructor(private readonly unitOfWork: UnitOfWorkPort) {}
 
   async execute(input: {
     userId: EntityId;
     category: GarmentCategory;
     primaryColor: string;
+    secondaryColors?: string[];
+    subcategory?: GarmentSubcategory | null;
+    pattern?: GarmentPattern | null;
+    fit?: GarmentFit | null;
+    estimatedMaterial?: GarmentMaterial | null;
+    formality?: number | null;
     status?: GarmentStatus;
     name?: string;
+    imageId?: EntityId;
   }): Promise<Garment> {
-    const user = await this.ports.users.findById(input.userId);
-    if (!user) {
-      throw new Error("User not found.");
-    }
+    return this.unitOfWork.transaction(async (ports) => {
+      const user = await ports.users.findById(input.userId);
+      if (!user) {
+        throw new Error("User not found.");
+      }
 
-    return this.ports.garments.create({
-      userId: input.userId,
-      category: input.category,
-      primaryColor: input.primaryColor,
-      status: input.status ?? GarmentStatus.CLEAN_AVAILABLE,
-      name: input.name
+      if (input.imageId) {
+        const image = await ports.garmentImages.findById(input.imageId);
+        if (!image) {
+          throw new Error("Garment image not found.");
+        }
+
+        if (image.userId !== input.userId) {
+          throw new Error("Garment image access is forbidden.");
+        }
+
+        if (image.garmentId) {
+          throw new Error("Garment image is already linked.");
+        }
+      }
+
+      validateGarmentMetadata(input);
+
+      const garment = await ports.garments.create({
+        userId: input.userId,
+        category: input.category,
+        primaryColor: normalizeColor(input.primaryColor),
+        secondaryColors: (input.secondaryColors ?? []).map(normalizeColor),
+        subcategory: input.subcategory ?? null,
+        pattern: input.pattern ?? null,
+        fit: input.fit ?? null,
+        estimatedMaterial: input.estimatedMaterial ?? null,
+        formality: input.formality ?? null,
+        status: input.status ?? GarmentStatus.CLEAN_AVAILABLE,
+        name: input.name
+      });
+
+      if (input.imageId) {
+        await ports.garmentImages.linkToGarment({ imageId: input.imageId, garmentId: garment.id });
+        return { ...garment, imageId: input.imageId };
+      }
+
+      return garment;
     });
   }
 }
@@ -201,4 +244,30 @@ function normalizeFeedbackReason(reason: string | null | undefined): string | nu
   }
 
   return trimmed;
+}
+
+function validateGarmentMetadata(input: { primaryColor: string; secondaryColors?: string[]; formality?: number | null }): void {
+  normalizeColor(input.primaryColor);
+
+  const secondaryColors = input.secondaryColors ?? [];
+  if (secondaryColors.length > 5) {
+    throw new Error("Too many secondary colors.");
+  }
+
+  secondaryColors.forEach(normalizeColor);
+
+  if (input.formality !== null && input.formality !== undefined) {
+    if (!Number.isInteger(input.formality) || input.formality < 1 || input.formality > 5) {
+      throw new Error("Garment formality must be between 1 and 5.");
+    }
+  }
+}
+
+function normalizeColor(color: string): string {
+  const normalized = color.trim().toUpperCase().replaceAll(/[^A-Z0-9_]/g, "_");
+  if (normalized.length === 0 || normalized.length > 40) {
+    throw new Error("Garment color is invalid.");
+  }
+
+  return normalized;
 }

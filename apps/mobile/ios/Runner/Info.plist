@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Closet AI usa la cámara para registrar prendas en tu guardarropa.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Closet AI usa tu biblioteca de fotos para seleccionar imágenes de prendas.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

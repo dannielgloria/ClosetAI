@@ -17,6 +17,7 @@ describe("runtime configuration", () => {
     delete process.env.OPENAI_API_KEY;
     delete process.env.AI_CONTEXT_MODEL;
     delete process.env.AI_OUTFIT_MODEL;
+    delete process.env.AI_VISION_MODEL;
 
     expect(() => validateProductionConfig()).toThrow("Missing or insecure production configuration");
   });
@@ -31,6 +32,7 @@ describe("runtime configuration", () => {
     process.env.OPENAI_API_KEY = "strong-openai-key";
     process.env.AI_CONTEXT_MODEL = "gpt-example";
     process.env.AI_OUTFIT_MODEL = "gpt-example";
+    process.env.AI_VISION_MODEL = "gpt-example";
     process.env.CORS_ALLOWED_ORIGINS = "*";
 
     expect(() => validateProductionConfig()).toThrow("Production requires explicit CORS_ALLOWED_ORIGINS");
@@ -46,6 +48,7 @@ describe("runtime configuration", () => {
     process.env.OPENAI_API_KEY = "strong-openai-key";
     process.env.AI_CONTEXT_MODEL = "gpt-example";
     process.env.AI_OUTFIT_MODEL = "gpt-example";
+    process.env.AI_VISION_MODEL = "gpt-example";
     process.env.CORS_ALLOWED_ORIGINS = "https://closet.example";
 
     expect(() => validateProductionConfig()).not.toThrow();
