@@ -97,6 +97,10 @@ export interface ClosetUser {
   id: EntityId;
   householdId: EntityId;
   displayName: string;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  timezone: string | null;
   createdAt: Date;
 }
 
@@ -186,4 +190,11 @@ export interface AuthSession {
   deviceName?: string;
   devicePlatform?: string;
   userAgent?: string;
+}
+
+export interface UserLocation {
+  city: string;
+  latitude: number;
+  longitude: number;
+  timezone: string;
 }

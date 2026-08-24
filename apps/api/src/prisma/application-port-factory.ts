@@ -82,6 +82,18 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
       findById: async (id) => {
         const row = await db.user.findUnique({ where: { id } });
         return row ? mapUser(row) : null;
+      },
+      updateLocation: async (userId, location) => {
+        const row = await db.user.update({
+          where: { id: userId },
+          data: {
+            city: location.city,
+            latitude: location.latitude,
+            longitude: location.longitude,
+            timezone: location.timezone
+          }
+        });
+        return mapUser(row);
       }
     };
   }

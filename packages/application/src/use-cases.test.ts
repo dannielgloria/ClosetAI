@@ -17,7 +17,8 @@ import {
   OutfitFeedback,
   OutfitFeedbackDecision,
   OutfitStatus,
-  UserCredential
+  UserCredential,
+  WeatherContext
 } from "@closet-ai/domain";
 import { ApplicationPorts, UnitOfWorkPort } from "./ports.js";
 import {
@@ -28,6 +29,7 @@ import {
   OutfitStylistPort,
   OutfitStylistRecommendationCandidate
 } from "./outfit-stylist.js";
+import { GetWeatherContextUseCase, UpdateUserLocationUseCase, weatherCacheKey, WeatherProviderFailedError, WeatherStatus } from "./weather.js";
 import {
   AnalyzeGarmentImageUseCase,
   GarmentAnalysis,
@@ -55,7 +57,17 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
     create: async () => {
       throw new Error("not implemented");
     },
-    findById: async (id: string) => this.userRows.get(id) ?? null
+    findById: async (id: string) => this.userRows.get(id) ?? null,
+    updateLocation: async (userId: string, location: { city: string; latitude: number; longitude: number; timezone: string }) => {
+      const user = this.userRows.get(userId);
+      if (!user) {
+        throw new Error("User not found.");
+      }
+
+      const updated = { ...user, ...location };
+      this.userRows.set(userId, updated);
+      return updated;
+    }
   };
   userCredentials = {
     create: async (input: { userId: string; email: string; passwordHash: string }) => {
@@ -240,7 +252,7 @@ describe("MVP use cases", () => {
   beforeEach(() => {
     ports = new InMemoryPorts();
     ports.householdRows.set("household-1", { id: "household-1", name: "Home", createdAt: new Date() });
-    ports.userRows.set("user-1", { id: "user-1", householdId: "household-1", displayName: "Dann", createdAt: new Date() });
+    ports.userRows.set("user-1", userFixture({ id: "user-1", householdId: "household-1", displayName: "Dann" }));
   });
 
   it("creates garments owned by an existing user", async () => {
@@ -352,7 +364,7 @@ describe("MVP use cases", () => {
       })
     ).rejects.toThrow("Garment image not found.");
 
-    ports.userRows.set("user-2", { id: "user-2", householdId: "household-1", displayName: "Other", createdAt: new Date() });
+    ports.userRows.set("user-2", userFixture({ id: "user-2", householdId: "household-1", displayName: "Other" }));
     const image = await new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 10 }).execute({
       userId: "user-2",
       content: new Uint8Array([1, 2, 3]),
@@ -395,7 +407,7 @@ describe("MVP use cases", () => {
   });
 
   it("rejects linking another user's image during garment creation", async () => {
-    ports.userRows.set("user-2", { id: "user-2", householdId: "household-1", displayName: "Other", createdAt: new Date() });
+    ports.userRows.set("user-2", userFixture({ id: "user-2", householdId: "household-1", displayName: "Other" }));
     const image = await ports.garmentImages.create({
       userId: "user-2",
       objectKey: "users/user-2/garment-images/image.jpg",
@@ -585,6 +597,112 @@ describe("MVP use cases", () => {
     });
   });
 
+  it("updates and returns the authenticated user's approximate location", async () => {
+    const user = await new UpdateUserLocationUseCase(ports).execute({
+      userId: "user-1",
+      location: {
+        city: " Ciudad de Mexico ",
+        latitude: 19.43261,
+        longitude: -99.13321,
+        timezone: "America/Mexico_City"
+      }
+    });
+
+    expect(user).toMatchObject({
+      city: "Ciudad de Mexico",
+      latitude: 19.4326,
+      longitude: -99.1332,
+      timezone: "America/Mexico_City"
+    });
+  });
+
+  it("returns weather from cache without calling the provider", async () => {
+    ports.userRows.set("user-1", userFixture({ id: "user-1", householdId: "household-1", displayName: "Dann" }));
+    await new UpdateUserLocationUseCase(ports).execute({
+      userId: "user-1",
+      location: mexicoCityLocation()
+    });
+    const cache = new FakeWeatherCache();
+    await cache.set(weatherCacheKey(mexicoCityLocation(), new Date("2026-08-24T12:00:00.000Z")), weatherContext({ temperature: 18 }), 1200);
+    const provider = new FakeWeatherProvider(weatherContext({ temperature: 28 }));
+
+    const weather = await new GetWeatherContextUseCase(ports, provider, cache, { cacheTtlSeconds: 1200 }).execute({
+      userId: "user-1",
+      now: new Date("2026-08-24T12:00:00.000Z")
+    });
+
+    expect(weather.temperature).toBe(18);
+    expect(provider.calls).toBe(0);
+  });
+
+  it("fetches weather on cache miss and stores normalized weather", async () => {
+    await new UpdateUserLocationUseCase(ports).execute({ userId: "user-1", location: mexicoCityLocation() });
+    const cache = new FakeWeatherCache();
+    const provider = new FakeWeatherProvider(weatherContext({ temperature: 21 }));
+
+    const weather = await new GetWeatherContextUseCase(ports, provider, cache, { cacheTtlSeconds: 1200 }).execute({
+      userId: "user-1",
+      now: new Date("2026-08-24T12:00:00.000Z")
+    });
+
+    expect(weather.temperature).toBe(21);
+    expect(provider.calls).toBe(1);
+    expect(cache.lastTtlSeconds).toBe(1200);
+  });
+
+  it("rejects malformed provider weather responses", async () => {
+    await new UpdateUserLocationUseCase(ports).execute({ userId: "user-1", location: mexicoCityLocation() });
+
+    await expect(
+      new GetWeatherContextUseCase(
+        ports,
+        new FakeWeatherProvider({ ...weatherContext({ temperature: 21 }), rainProbability: 101 }),
+        new FakeWeatherCache(),
+        { cacheTtlSeconds: 1200 }
+      ).execute({ userId: "user-1" })
+    ).rejects.toThrow("Invalid weather rain probability.");
+  });
+
+  it("reports user without location", async () => {
+    await expect(
+      new GetWeatherContextUseCase(ports, new FakeWeatherProvider(weatherContext({})), new FakeWeatherCache(), { cacheTtlSeconds: 1200 }).execute({
+        userId: "user-1"
+      })
+    ).rejects.toThrow("User location not configured.");
+  });
+
+  it("passes normalized weather to the AI stylist when available", async () => {
+    const { top, bottom, footwear } = await createBasicEligibleGarments(ports);
+    await new UpdateUserLocationUseCase(ports).execute({ userId: "user-1", location: mexicoCityLocation() });
+    const stylist = new FakeOutfitStylist([{ garmentIds: [top.id, bottom.id, footwear.id], score: 91, reason: "Works with mild weather." }]);
+
+    const result = await new GenerateOutfitRecommendationsUseCase(ports, stylist, {
+      provider: new FakeWeatherProvider(weatherContext({ temperature: 18 })),
+      cache: new FakeWeatherCache(),
+      config: { cacheTtlSeconds: 1200 }
+    }).execute({ userId: "user-1", context: { activities: [{ type: ActivityType.CASUAL_DINNER, time: "20:00" }] } });
+
+    expect(result.weatherStatus).toBe(WeatherStatus.AVAILABLE);
+    expect(result.weather?.temperature).toBe(18);
+    expect(stylist.lastInput?.weather?.temperature).toBe(18);
+  });
+
+  it("continues outfit recommendation without weather when provider fails", async () => {
+    const { top, bottom, footwear } = await createBasicEligibleGarments(ports);
+    await new UpdateUserLocationUseCase(ports).execute({ userId: "user-1", location: mexicoCityLocation() });
+    const stylist = new FakeOutfitStylist([{ garmentIds: [top.id, bottom.id, footwear.id], score: 84, reason: "Still valid." }]);
+
+    const result = await new GenerateOutfitRecommendationsUseCase(ports, stylist, {
+      provider: new FakeWeatherProvider(new WeatherProviderFailedError()),
+      cache: new FakeWeatherCache(),
+      config: { cacheTtlSeconds: 1200 }
+    }).execute({ userId: "user-1", context: { activities: [{ type: ActivityType.CASUAL_DINNER, time: "20:00" }] } });
+
+    expect(result.strategy).toBe(OutfitRecommendationStrategy.AI);
+    expect(result.weatherStatus).toBe(WeatherStatus.UNAVAILABLE);
+    expect(stylist.lastInput?.weather).toBeUndefined();
+  });
+
   it("rejects invalid AI garment IDs", async () => {
     await createBasicEligibleGarments(ports);
 
@@ -666,11 +784,15 @@ describe("MVP use cases", () => {
 });
 
 class FakeOutfitStylist implements OutfitStylistPort {
-  lastInput: { garments: OutfitStylistGarmentCandidate[]; maxRecommendations: number } | null = null;
+  lastInput: { garments: OutfitStylistGarmentCandidate[]; maxRecommendations: number; weather?: WeatherContext } | null = null;
 
   constructor(private readonly result: OutfitStylistRecommendationCandidate[] | OutfitStylistFailedError) {}
 
-  async recommend(input: { garments: OutfitStylistGarmentCandidate[]; maxRecommendations: number }): Promise<OutfitStylistRecommendationCandidate[]> {
+  async recommend(input: {
+    garments: OutfitStylistGarmentCandidate[];
+    maxRecommendations: number;
+    weather?: WeatherContext;
+  }): Promise<OutfitStylistRecommendationCandidate[]> {
     this.lastInput = input;
     if (this.result instanceof OutfitStylistFailedError) {
       throw this.result;
@@ -711,6 +833,35 @@ class FakeGarmentAnalyzer implements GarmentAnalyzerPort {
   }
 }
 
+class FakeWeatherProvider {
+  calls = 0;
+
+  constructor(private readonly result: WeatherContext | Error) {}
+
+  async getCurrent(): Promise<WeatherContext> {
+    this.calls += 1;
+    if (this.result instanceof Error) {
+      throw this.result;
+    }
+
+    return this.result;
+  }
+}
+
+class FakeWeatherCache {
+  private readonly rows = new Map<string, WeatherContext>();
+  lastTtlSeconds: number | null = null;
+
+  async get(key: string): Promise<WeatherContext | null> {
+    return this.rows.get(key) ?? null;
+  }
+
+  async set(key: string, value: WeatherContext, ttlSeconds: number): Promise<void> {
+    this.lastTtlSeconds = ttlSeconds;
+    this.rows.set(key, value);
+  }
+}
+
 function defaultAnalysis(): GarmentAnalysis {
   return {
     category: GarmentCategory.TOP,
@@ -721,6 +872,39 @@ function defaultAnalysis(): GarmentAnalysis {
     fit: GarmentFit.REGULAR,
     estimatedMaterial: GarmentMaterial.COTTON,
     formality: 2
+  };
+}
+
+function userFixture(input: { id: string; householdId: string; displayName: string }): ClosetUser {
+  return {
+    ...input,
+    city: null,
+    latitude: null,
+    longitude: null,
+    timezone: null,
+    createdAt: new Date("2026-08-23T00:00:00.000Z")
+  };
+}
+
+function mexicoCityLocation() {
+  return {
+    city: "Ciudad de Mexico",
+    latitude: 19.4326,
+    longitude: -99.1332,
+    timezone: "America/Mexico_City"
+  };
+}
+
+function weatherContext(overrides: Partial<WeatherContext>): WeatherContext {
+  return {
+    temperature: 20,
+    apparentTemperature: 19,
+    minTemperature: 15,
+    maxTemperature: 24,
+    rainProbability: 20,
+    windSpeed: 10,
+    humidity: 60,
+    ...overrides
   };
 }
 

@@ -107,6 +107,10 @@ model User {
   id             String              @id @default(uuid()) @db.Uuid
   householdId    String              @map("household_id") @db.Uuid
   displayName    String              @map("display_name")
+  city           String?
+  latitude       Float?
+  longitude      Float?
+  timezone       String?
   createdAt      DateTime            @default(now()) @map("created_at")
   household      Household           @relation(fields: [householdId], references: [id], onDelete: Cascade)
   garments       Garment[]

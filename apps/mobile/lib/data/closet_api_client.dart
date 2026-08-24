@@ -76,6 +76,26 @@ class ClosetApiClient {
     return decoded;
   }
 
+  Future<Map<String, Object?>> patchObject(
+    String path, {
+    Map<String, Object?> body = const {},
+    bool authenticated = true,
+  }) async {
+    final response = await _send(
+      'PATCH',
+      path,
+      body: body,
+      authenticated: authenticated,
+    );
+    final decoded = jsonDecode(response);
+
+    if (decoded is! Map<String, Object?>) {
+      throw const FormatException('Expected a JSON object.');
+    }
+
+    return decoded;
+  }
+
   Future<Map<String, Object?>> postMultipartObject(
     String path, {
     required String fieldName,

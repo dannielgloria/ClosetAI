@@ -12,6 +12,7 @@ import 'data/context_repository.dart';
 import 'data/token_storage.dart';
 import 'data/wardrobe_repository.dart';
 import 'domain/garment.dart';
+import 'domain/weather.dart';
 
 const defaultApiBaseUrl = String.fromEnvironment(
   'CLOSET_API_BASE_URL',
@@ -391,6 +392,30 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
               ),
               const SizedBox(height: 12),
             ],
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _controller.weather == null
+                        ? 'Weather not configured'
+                        : '${_controller.weather!.temperature.round()}°C, rain ${_controller.weather!.rainProbability.round()}%',
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _controller.isLoading ? null : _showLocationDialog,
+                  icon: const Icon(Icons.location_city_outlined),
+                  label: const Text('Location'),
+                ),
+                IconButton(
+                  onPressed: _controller.isLoading
+                      ? null
+                      : _controller.loadWeather,
+                  icon: const Icon(Icons.wb_cloudy_outlined),
+                  tooltip: 'Load weather',
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
             Text(
               'Garments',
               style: textTheme.titleMedium?.copyWith(
@@ -470,6 +495,7 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
               ),
               const SizedBox(height: 4),
               Text('Strategy: ${_controller.recommendationStrategy}'),
+              Text('Weather: ${_controller.weatherStatus ?? 'NOT_CONFIGURED'}'),
               const SizedBox(height: 8),
               for (final recommendation in _controller.recommendations)
                 Padding(
@@ -553,6 +579,19 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
     return _controller.generateOutfitRecommendations(
       context: _contextController.interpretedContext,
     );
+  }
+
+  Future<void> _showLocationDialog() async {
+    final result = await showDialog<UserLocation>(
+      context: context,
+      builder: (context) => const _LocationDialog(),
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    await _controller.updateLocation(result);
   }
 
   Future<void> _pickAnalyzeAndReview(ImageSource source) async {
@@ -662,6 +701,97 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
       fit: result.fit,
       estimatedMaterial: result.estimatedMaterial,
       formality: result.formality,
+    );
+  }
+}
+
+class _LocationDialog extends StatefulWidget {
+  const _LocationDialog();
+
+  @override
+  State<_LocationDialog> createState() => _LocationDialogState();
+}
+
+class _LocationDialogState extends State<_LocationDialog> {
+  final _cityController = TextEditingController(text: 'Ciudad de Mexico');
+  final _latitudeController = TextEditingController(text: '19.4326');
+  final _longitudeController = TextEditingController(text: '-99.1332');
+  final _timezoneController = TextEditingController(
+    text: 'America/Mexico_City',
+  );
+
+  @override
+  void dispose() {
+    _cityController.dispose();
+    _latitudeController.dispose();
+    _longitudeController.dispose();
+    _timezoneController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Weather location'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _cityController,
+              decoration: const InputDecoration(labelText: 'City'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _latitudeController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+                signed: true,
+              ),
+              decoration: const InputDecoration(labelText: 'Latitude'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _longitudeController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+                signed: true,
+              ),
+              decoration: const InputDecoration(labelText: 'Longitude'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _timezoneController,
+              decoration: const InputDecoration(labelText: 'Timezone'),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final latitude = double.tryParse(_latitudeController.text.trim());
+            final longitude = double.tryParse(_longitudeController.text.trim());
+            if (latitude == null || longitude == null) {
+              return;
+            }
+
+            Navigator.of(context).pop(
+              UserLocation(
+                city: _cityController.text.trim(),
+                latitude: latitude,
+                longitude: longitude,
+                timezone: _timezoneController.text.trim(),
+              ),
+            );
+          },
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }

@@ -42,6 +42,15 @@ const metadata = {
 
 const input = {
   context: { activities: [{ type: ActivityType.CASUAL_DINNER, time: "20:00" }] },
+  weather: {
+    temperature: 18,
+    apparentTemperature: 17,
+    minTemperature: 14,
+    maxTemperature: 22,
+    rainProbability: 45,
+    windSpeed: 12,
+    humidity: 68
+  },
   garments: [
     { id: "top-1", category: GarmentCategory.TOP, primaryColor: "black", status: GarmentStatus.CLEAN_AVAILABLE, name: "Black tee", ...metadata },
     { id: "bottom-1", category: GarmentCategory.BOTTOM, primaryColor: "blue", status: GarmentStatus.CLEAN_AVAILABLE, ...metadata },
@@ -65,7 +74,14 @@ describe("OpenAIOutfitStylistAdapter", () => {
     expect(client.request?.model).toBe("test-outfit-model");
     expect(client.request?.store).toBe(false);
     expect(client.request?.instructions).toContain("Use only garment IDs present");
+    expect(client.request?.instructions).toContain("normalized weather context");
     expect(client.request?.text?.format?.type).toBe("json_schema");
+    expect(JSON.parse(String(client.request?.input))).toMatchObject({
+      weather: {
+        temperature: 18,
+        rainProbability: 45
+      }
+    });
   });
 
   it("maps valid provider JSON into recommendation candidates", async () => {

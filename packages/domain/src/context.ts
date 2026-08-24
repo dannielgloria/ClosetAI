@@ -25,6 +25,16 @@ export interface InterpretedContext {
   activities: ActivityContext[];
 }
 
+export interface WeatherContext {
+  temperature: number;
+  apparentTemperature: number;
+  minTemperature: number;
+  maxTemperature: number;
+  rainProbability: number;
+  windSpeed: number;
+  humidity: number;
+}
+
 const MAX_ACTIVITIES = 10;
 const HH_MM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -40,6 +50,28 @@ export function parseInterpretedContext(value: unknown): InterpretedContext {
   return {
     activities: value.activities.map(parseActivityContext)
   };
+}
+
+export function parseWeatherContext(value: unknown): WeatherContext {
+  if (!isRecord(value)) {
+    throw new Error("Invalid weather context.");
+  }
+
+  const weather = {
+    temperature: parseFiniteNumber(value.temperature, "temperature"),
+    apparentTemperature: parseFiniteNumber(value.apparentTemperature, "apparent temperature"),
+    minTemperature: parseFiniteNumber(value.minTemperature, "min temperature"),
+    maxTemperature: parseFiniteNumber(value.maxTemperature, "max temperature"),
+    rainProbability: parsePercentage(value.rainProbability, "rain probability"),
+    windSpeed: parseFiniteNumber(value.windSpeed, "wind speed"),
+    humidity: parsePercentage(value.humidity, "humidity")
+  };
+
+  if (weather.minTemperature > weather.maxTemperature) {
+    throw new Error("Invalid weather temperature range.");
+  }
+
+  return weather;
 }
 
 function parseActivityContext(value: unknown): ActivityContext {
@@ -63,6 +95,23 @@ function parseActivityContext(value: unknown): ActivityContext {
 
 function isActivityType(value: unknown): value is ActivityType {
   return typeof value === "string" && ACTIVITY_TYPES.includes(value as ActivityType);
+}
+
+function parseFiniteNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Invalid weather ${label}.`);
+  }
+
+  return value;
+}
+
+function parsePercentage(value: unknown, label: string): number {
+  const parsed = parseFiniteNumber(value, label);
+  if (parsed < 0 || parsed > 100) {
+    throw new Error(`Invalid weather ${label}.`);
+  }
+
+  return parsed;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -11,10 +11,23 @@ import {
   GarmentAnalyzerPort,
   ObjectStoragePort,
   OutfitStylistFailedError,
+  OutfitStylistGarmentCandidate,
   OutfitStylistPort,
-  OutfitStylistRecommendationCandidate
+  OutfitStylistRecommendationCandidate,
+  WeatherCachePort,
+  WeatherPort,
+  WeatherProviderFailedError
 } from "@closet-ai/application";
-import { ActivityType, GarmentCategory, GarmentFit, GarmentMaterial, GarmentPattern, GarmentSubcategory, InterpretedContext } from "@closet-ai/domain";
+import {
+  ActivityType,
+  GarmentCategory,
+  GarmentFit,
+  GarmentMaterial,
+  GarmentPattern,
+  GarmentSubcategory,
+  InterpretedContext,
+  WeatherContext
+} from "@closet-ai/domain";
 import request from "supertest";
 import { GenericContainer, StartedTestContainer, Wait } from "testcontainers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -24,6 +37,7 @@ import { CONTEXT_INTERPRETER } from "../src/context/context-interpreter.provider
 import { GARMENT_ANALYZER } from "../src/garment-analyzer/garment-analyzer.provider.js";
 import { OUTFIT_STYLIST } from "../src/outfit-stylist/outfit-stylist.provider.js";
 import { OBJECT_STORAGE } from "../src/storage/object-storage.provider.js";
+import { WEATHER_CACHE, WEATHER_PROVIDER } from "../src/weather/weather.provider.js";
 
 interface HouseholdResponse {
   household: { id: string; name: string };
@@ -73,6 +87,8 @@ interface ConfirmUsageResponse {
 
 interface OutfitRecommendationsResponse {
   strategy: "AI" | "DETERMINISTIC_FALLBACK";
+  weatherStatus: "AVAILABLE" | "UNAVAILABLE" | "NOT_CONFIGURED";
+  weather: WeatherContext | null;
   recommendations: OutfitResponse[];
 }
 
@@ -93,6 +109,8 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
   let prisma: PrismaClient;
   let contextInterpreterResult: InterpretedContext | Error;
   let outfitStylistResult: OutfitStylistRecommendationCandidate[] | OutfitStylistFailedError;
+  let outfitStylistInput: { context: InterpretedContext; weather?: WeatherContext; garments: OutfitStylistGarmentCandidate[]; maxRecommendations: number } | null;
+  let weatherProviderResult: WeatherContext | WeatherProviderFailedError;
   let garmentAnalyzerResult:
     | {
         category: GarmentCategory;
@@ -106,6 +124,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       }
     | GarmentAnalysisFailedError;
   const objectStorage = new IntegrationObjectStorage();
+  const weatherCache = new IntegrationWeatherCache();
 
   beforeAll(async () => {
     container = await new GenericContainer("postgres:16-alpine")
@@ -164,7 +183,13 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       } satisfies ContextInterpreterPort)
       .overrideProvider(OUTFIT_STYLIST)
       .useValue({
-        recommend: async () => {
+        recommend: async (input: {
+          context: InterpretedContext;
+          weather?: WeatherContext;
+          garments: OutfitStylistGarmentCandidate[];
+          maxRecommendations: number;
+        }) => {
+          outfitStylistInput = input;
           if (outfitStylistResult instanceof OutfitStylistFailedError) {
             throw outfitStylistResult;
           }
@@ -172,6 +197,18 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
           return outfitStylistResult;
         }
       } satisfies OutfitStylistPort)
+      .overrideProvider(WEATHER_PROVIDER)
+      .useValue({
+        getCurrent: async () => {
+          if (weatherProviderResult instanceof WeatherProviderFailedError) {
+            throw weatherProviderResult;
+          }
+
+          return weatherProviderResult;
+        }
+      } satisfies WeatherPort)
+      .overrideProvider(WEATHER_CACHE)
+      .useValue(weatherCache satisfies WeatherCachePort)
       .overrideProvider(GARMENT_ANALYZER)
       .useValue({
         analyze: async () => {
@@ -207,6 +244,16 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     process.env.AUTH_REFRESH_RATE_LIMIT_WINDOW_SECONDS = "60";
     contextInterpreterResult = { activities: [{ type: ActivityType.GYM, time: "17:00" }] };
     outfitStylistResult = [];
+    outfitStylistInput = null;
+    weatherProviderResult = {
+      temperature: 18,
+      apparentTemperature: 17,
+      minTemperature: 14,
+      maxTemperature: 22,
+      rainProbability: 45,
+      windSpeed: 12,
+      humidity: 68
+    };
     garmentAnalyzerResult = {
       category: GarmentCategory.TOP,
       subcategory: GarmentSubcategory.T_SHIRT,
@@ -218,6 +265,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       formality: 2
     };
     objectStorage.clear();
+    weatherCache.clear();
     await prisma.outfitFeedback.deleteMany();
     await prisma.garmentUsageEvent.deleteMany();
     await prisma.outfitItem.deleteMany();
@@ -758,6 +806,90 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       .expect(200);
   });
 
+  it("configures location, enriches outfit recommendations with weather, and exposes current weather", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const top = await createGarment(auth.accessToken, "TOP", "black", "CLEAN_AVAILABLE", "Black tee");
+    const bottom = await createGarment(auth.accessToken, "BOTTOM", "indigo", "CLEAN_AVAILABLE", "Jeans");
+    const footwear = await createGarment(auth.accessToken, "FOOTWEAR", "white", "CLEAN_AVAILABLE", "Sneakers");
+    outfitStylistResult = [{ garmentIds: [top.id, bottom.id, footwear.id], score: 91, reason: "Good for cool dinner weather." }];
+
+    await request(app.getHttpServer())
+      .patch("/api/v1/me/location")
+      .set(authHeader(auth.accessToken))
+      .send({ city: "Ciudad de Mexico", latitude: 19.4326, longitude: -99.1332, timezone: "America/Mexico_City" })
+      .expect(200);
+
+    await request(app.getHttpServer()).get("/api/v1/weather/current").set(authHeader(auth.accessToken)).expect(200).expect((response) => {
+      expect(response.body).toMatchObject({ temperature: 18, rainProbability: 45 });
+    });
+
+    const result = await request(app.getHttpServer())
+      .post("/api/v1/outfit-recommendations")
+      .set(authHeader(auth.accessToken))
+      .send({ context: { activities: [{ type: "CASUAL_DINNER", time: "20:00" }] } })
+      .expect(201)
+      .then((response) => response.body as OutfitRecommendationsResponse);
+
+    expect(result.weatherStatus).toBe("AVAILABLE");
+    expect(result.weather).toMatchObject({ temperature: 18, rainProbability: 45 });
+    expect(outfitStylistInput?.weather).toMatchObject({ temperature: 18, rainProbability: 45 });
+  });
+
+  it("continues outfit recommendation when weather provider fails", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const top = await createGarment(auth.accessToken, "TOP", "black");
+    const bottom = await createGarment(auth.accessToken, "BOTTOM", "indigo");
+    const footwear = await createGarment(auth.accessToken, "FOOTWEAR", "white");
+    outfitStylistResult = [{ garmentIds: [top.id, bottom.id, footwear.id], score: 84, reason: "Valid without weather." }];
+    weatherProviderResult = new WeatherProviderFailedError();
+    await request(app.getHttpServer())
+      .patch("/api/v1/me/location")
+      .set(authHeader(auth.accessToken))
+      .send({ city: "Ciudad de Mexico", latitude: 19.4326, longitude: -99.1332, timezone: "America/Mexico_City" })
+      .expect(200);
+
+    const result = await request(app.getHttpServer())
+      .post("/api/v1/outfit-recommendations")
+      .set(authHeader(auth.accessToken))
+      .send({ context: { activities: [{ type: "CASUAL_DINNER", time: "20:00" }] } })
+      .expect(201)
+      .then((response) => response.body as OutfitRecommendationsResponse);
+
+    expect(result.strategy).toBe("AI");
+    expect(result.weatherStatus).toBe("UNAVAILABLE");
+    expect(result.weather).toBeNull();
+    expect(outfitStylistInput?.weather).toBeUndefined();
+  });
+
+  it("keeps outfit recommendation available when user has no location", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const top = await createGarment(auth.accessToken, "TOP", "black");
+    const bottom = await createGarment(auth.accessToken, "BOTTOM", "indigo");
+    const footwear = await createGarment(auth.accessToken, "FOOTWEAR", "white");
+    outfitStylistResult = [{ garmentIds: [top.id, bottom.id, footwear.id], score: 82, reason: "Valid without configured weather." }];
+
+    await request(app.getHttpServer()).get("/api/v1/weather/current").set(authHeader(auth.accessToken)).expect(404);
+
+    const result = await request(app.getHttpServer())
+      .post("/api/v1/outfit-recommendations")
+      .set(authHeader(auth.accessToken))
+      .send({ context: { activities: [{ type: "CASUAL_DINNER", time: "20:00" }] } })
+      .expect(201)
+      .then((response) => response.body as OutfitRecommendationsResponse);
+
+    expect(result.weatherStatus).toBe("NOT_CONFIGURED");
+    expect(result.weather).toBeNull();
+  });
+
+  it("does not allow clients to modify another user's location", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    await request(app.getHttpServer())
+      .patch("/api/v1/me/location")
+      .set(authHeader(auth.accessToken))
+      .send({ city: "Ciudad de Mexico", latitude: 19.4326, longitude: -99.1332, timezone: "America/Mexico_City", userId: "other" })
+      .expect(400);
+  });
+
   it("rejects AI recommendations with invalid garment IDs", async () => {
     const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
     await createGarment(auth.accessToken, "TOP", "black");
@@ -1003,5 +1135,21 @@ class IntegrationObjectStorage implements ObjectStoragePort {
     }
 
     return object;
+  }
+}
+
+class IntegrationWeatherCache implements WeatherCachePort {
+  private readonly rows = new Map<string, WeatherContext>();
+
+  clear(): void {
+    this.rows.clear();
+  }
+
+  async get(key: string): Promise<WeatherContext | null> {
+    return this.rows.get(key) ?? null;
+  }
+
+  async set(key: string, value: WeatherContext): Promise<void> {
+    this.rows.set(key, value);
   }
 }

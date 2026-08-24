@@ -7,8 +7,8 @@ import {
   OutfitStylistPort,
   OutfitStylistRecommendationCandidate
 } from "@closet-ai/application";
-import { InterpretedContext } from "@closet-ai/domain";
-import { buildOutfitStylistInstructions, OUTFIT_STYLIST_PROMPT_VERSION } from "../../../../prompts/outfit-stylist/v1.js";
+import { InterpretedContext, WeatherContext } from "@closet-ai/domain";
+import { buildOutfitStylistInstructions, OUTFIT_STYLIST_PROMPT_VERSION } from "../../../../prompts/outfit-stylist/v2.js";
 import { AiConfig } from "../ai/ai-config.js";
 import { AI_CONFIG, OpenAIResponsesClient, OPENAI_RESPONSES_CLIENT } from "../ai/openai-responses-client.js";
 
@@ -26,6 +26,7 @@ export class OpenAIOutfitStylistAdapter implements OutfitStylistPort {
 
   async recommend(input: {
     context: InterpretedContext;
+    weather?: WeatherContext;
     garments: OutfitStylistGarmentCandidate[];
     maxRecommendations: number;
   }): Promise<OutfitStylistRecommendationCandidate[]> {
@@ -74,6 +75,7 @@ export class OpenAIOutfitStylistAdapter implements OutfitStylistPort {
 
   private buildRequest(input: {
     context: InterpretedContext;
+    weather?: WeatherContext;
     garments: OutfitStylistGarmentCandidate[];
     maxRecommendations: number;
   }): ResponseCreateParamsNonStreaming {
@@ -82,6 +84,7 @@ export class OpenAIOutfitStylistAdapter implements OutfitStylistPort {
       instructions: buildOutfitStylistInstructions({ maxRecommendations: input.maxRecommendations }),
       input: JSON.stringify({
         context: input.context,
+        weather: input.weather ?? null,
         garments: input.garments,
         maxRecommendations: input.maxRecommendations
       }),

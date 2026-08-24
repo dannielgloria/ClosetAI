@@ -21,6 +21,8 @@ import { CurrentUser } from "../auth/current-user.decorator.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import { ApplicationPortFactory } from "../prisma/application-port-factory.js";
 import { OUTFIT_STYLIST, OutfitStylistProvider } from "../outfit-stylist/outfit-stylist.provider.js";
+import { WEATHER_CACHE, WeatherCacheProvider, WEATHER_PROVIDER, WeatherProvider } from "../weather/weather.provider.js";
+import { WEATHER_CONFIG, WeatherRuntimeConfig } from "../weather/weather-config.js";
 import {
   ConfirmOutfitUsageDto,
   ConfirmOutfitUsageResponseDto,
@@ -41,7 +43,10 @@ export class OutfitsController {
 
   constructor(
     private readonly portFactory: ApplicationPortFactory,
-    @Inject(OUTFIT_STYLIST) private readonly outfitStylist: OutfitStylistProvider
+    @Inject(OUTFIT_STYLIST) private readonly outfitStylist: OutfitStylistProvider,
+    @Inject(WEATHER_PROVIDER) private readonly weatherProvider: WeatherProvider,
+    @Inject(WEATHER_CACHE) private readonly weatherCache: WeatherCacheProvider,
+    @Inject(WEATHER_CONFIG) private readonly weatherConfig: WeatherRuntimeConfig
   ) {}
 
   @Post("outfit-recommendations")
@@ -54,7 +59,11 @@ export class OutfitsController {
     @Body() body: GenerateOutfitRecommendationsDto
   ): Promise<GenerateOutfitRecommendationsResponseDto> {
     try {
-      return await new GenerateOutfitRecommendationsUseCase(this.portFactory.create(), this.outfitStylist).execute({
+      return await new GenerateOutfitRecommendationsUseCase(this.portFactory.create(), this.outfitStylist, {
+        provider: this.weatherProvider,
+        cache: this.weatherCache,
+        config: this.weatherConfig
+      }).execute({
         userId: currentUser.userId,
         context: body.context
       });

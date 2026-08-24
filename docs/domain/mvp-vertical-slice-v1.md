@@ -58,3 +58,19 @@ or edits the proposed fields through the existing garment creation flow.
 An uploaded image may temporarily have no `garmentId` if the user analyzes but
 does not confirm registration. Cleanup of old orphan images is deferred to a
 future BullMQ maintenance job.
+
+## Weather Context
+
+Weather Context v1 stores only an approximate user-configured location on
+`User`: city, latitude, longitude, and timezone. It does not use device GPS,
+does not track movement, and does not persist weather history.
+
+Outfit recommendation enriches structured context with normalized
+`WeatherContext` when available. If Open-Meteo or Redis cache access fails, the
+recommendation flow continues without weather and reports the weather status in
+the response.
+
+Current garment metadata does not include waterproofing, warmth rating, or
+seasonality. Because of that, Weather v1 does not add new deterministic garment
+exclusion rules beyond the existing ownership, availability, and category
+requirements; weather is used as an AI ranking/context signal only.

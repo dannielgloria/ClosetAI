@@ -39,7 +39,13 @@ OpenAI receives only a minimal garment candidate representation:
 ```text
 id
 category
+subcategory
 primaryColor
+secondaryColors
+pattern
+fit
+estimatedMaterial
+formality
 status
 name
 ```
@@ -67,3 +73,10 @@ If OpenAI fails with a provider error, timeout, malformed output, or unavailable
 - The persisted `Outfit` model does not yet store the generation strategy explicitly. API responses expose strategy for the current request, but historical analytics will need a persistence addition later.
 - Current garment metadata is minimal, so AI quality is limited until subcategory, material, fit, formality, images, and user style profile exist.
 - Fallback can produce a valid but less context-aware outfit.
+
+## Weather Context Update
+
+Weather Context v1 enriches the stylist input with normalized `WeatherContext`
+when the authenticated user has an approximate location configured and the
+weather provider is available. OpenAI never receives raw Open-Meteo responses.
+If weather lookup fails, recommendations continue without weather.

@@ -169,6 +169,70 @@ Responses:
 429 not applied
 ```
 
+## Profile and Weather
+
+### Configure My Weather Location
+
+```text
+PATCH /api/v1/me/location
+```
+
+Requires Bearer auth. Stores an approximate user-configured location used only
+for weather enrichment. The API does not accept `userId`; the user is derived
+from the access token.
+
+Request:
+
+```json
+{
+  "city": "Ciudad de Mexico",
+  "latitude": 19.4326,
+  "longitude": -99.1332,
+  "timezone": "America/Mexico_City"
+}
+```
+
+Responses:
+
+```text
+200 location updated
+400 invalid location or unexpected fields
+401 missing, invalid, expired, or revoked access token
+```
+
+### Current Weather
+
+```text
+GET /api/v1/weather/current
+```
+
+Requires Bearer auth. Returns normalized weather for the authenticated user's
+configured approximate location. The API does not expose raw Open-Meteo
+responses.
+
+Response:
+
+```json
+{
+  "temperature": 18,
+  "apparentTemperature": 17,
+  "minTemperature": 14,
+  "maxTemperature": 22,
+  "rainProbability": 45,
+  "windSpeed": 12,
+  "humidity": 68
+}
+```
+
+Responses:
+
+```text
+200 normalized weather context
+401 missing, invalid, expired, or revoked access token
+404 user location is not configured
+503 weather provider unavailable
+```
+
 ## Context Interpretation
 
 ### Interpret Context
@@ -428,6 +492,16 @@ Response:
 ```json
 {
   "strategy": "AI",
+  "weatherStatus": "AVAILABLE",
+  "weather": {
+    "temperature": 18,
+    "apparentTemperature": 17,
+    "minTemperature": 14,
+    "maxTemperature": 22,
+    "rainProbability": 45,
+    "windSpeed": 12,
+    "humidity": 68
+  },
   "recommendations": [
     {
       "id": "uuid",
@@ -455,6 +529,14 @@ Strategies:
 ```text
 AI
 DETERMINISTIC_FALLBACK
+```
+
+Weather status:
+
+```text
+AVAILABLE
+UNAVAILABLE
+NOT_CONFIGURED
 ```
 
 Responses:

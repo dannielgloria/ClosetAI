@@ -1,6 +1,7 @@
 import '../domain/garment.dart';
 import '../domain/interpreted_context.dart';
 import '../domain/outfit_recommendation.dart';
+import '../domain/weather.dart';
 import 'closet_api_client.dart';
 
 abstract interface class WardrobeRepository {
@@ -30,6 +31,10 @@ abstract interface class WardrobeRepository {
 
   Future<List<int>> fetchGarmentImage(String imageId);
 
+  Future<UserLocation> updateLocation(UserLocation location);
+
+  Future<WeatherContext> fetchCurrentWeather();
+
   Future<OutfitRecommendationsResult> generateOutfitRecommendations({
     InterpretedContext? context,
   });
@@ -53,6 +58,23 @@ class ApiWardrobeRepository implements WardrobeRepository {
     final rows = await _apiClient.getList('/garments');
 
     return rows.map(Garment.fromJson).toList(growable: false);
+  }
+
+  @override
+  Future<UserLocation> updateLocation(UserLocation location) async {
+    final row = await _apiClient.patchObject(
+      '/me/location',
+      body: location.toJson(),
+    );
+
+    return UserLocation.fromJson(row);
+  }
+
+  @override
+  Future<WeatherContext> fetchCurrentWeather() async {
+    final row = await _apiClient.getObject('/weather/current');
+
+    return WeatherContext.fromJson(row);
   }
 
   @override

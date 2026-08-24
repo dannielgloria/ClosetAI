@@ -19,7 +19,16 @@ import {
 } from "@closet-ai/domain";
 
 type PrismaHousehold = { id: string; name: string; createdAt: Date };
-type PrismaUser = { id: string; householdId: string; displayName: string; createdAt: Date };
+type PrismaUser = {
+  id: string;
+  householdId: string;
+  displayName: string;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  timezone: string | null;
+  createdAt: Date;
+};
 type PrismaUserCredential = {
   id: string;
   userId: string;
@@ -102,7 +111,16 @@ export function mapHousehold(row: PrismaHousehold): Household {
 }
 
 export function mapUser(row: PrismaUser): ClosetUser {
-  return { id: row.id, householdId: row.householdId, displayName: row.displayName, createdAt: row.createdAt };
+  return {
+    id: row.id,
+    householdId: row.householdId,
+    displayName: row.displayName,
+    city: row.city,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    timezone: row.timezone,
+    createdAt: row.createdAt
+  };
 }
 
 export function mapUserCredential(row: PrismaUserCredential): UserCredential {

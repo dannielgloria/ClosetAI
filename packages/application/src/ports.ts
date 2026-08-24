@@ -10,7 +10,9 @@ import {
   OutfitFeedback,
   OutfitFeedbackDecision,
   OutfitStatus,
-  UserCredential
+  UserCredential,
+  UserLocation,
+  WeatherContext
 } from "@closet-ai/domain";
 
 export interface CreateHouseholdRecord {
@@ -26,6 +28,7 @@ export interface HouseholdRepositoryPort {
 export interface UserRepositoryPort {
   create(input: { householdId: EntityId; displayName: string }): Promise<ClosetUser>;
   findById(id: EntityId): Promise<ClosetUser | null>;
+  updateLocation(userId: EntityId, location: UserLocation): Promise<ClosetUser>;
 }
 
 export interface UserCredentialRepositoryPort {
@@ -101,6 +104,15 @@ export interface OutfitFeedbackRepositoryPort {
     reason: string | null;
   }): Promise<OutfitFeedback>;
   findByOutfitId(outfitId: EntityId): Promise<OutfitFeedback[]>;
+}
+
+export interface WeatherCachePort {
+  get(key: string): Promise<WeatherContext | null>;
+  set(key: string, value: WeatherContext, ttlSeconds: number): Promise<void>;
+}
+
+export interface WeatherPort {
+  getCurrent(input: { latitude: number; longitude: number; timezone: string }): Promise<WeatherContext>;
 }
 
 export interface UnitOfWorkPort {

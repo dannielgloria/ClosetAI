@@ -5,8 +5,10 @@ import { PrismaModule } from "./prisma/prisma.module.js";
 import { HouseholdsController } from "./interfaces/households.controller.js";
 import { GarmentsController } from "./interfaces/garments.controller.js";
 import { GarmentImagesController } from "./interfaces/garment-images.controller.js";
+import { MeController } from "./interfaces/me.controller.js";
 import { OutfitsController } from "./interfaces/outfits.controller.js";
 import { PrivateSetupController } from "./interfaces/private-setup.controller.js";
+import { WeatherController } from "./interfaces/weather.controller.js";
 import { ContextModule } from "./context/context.module.js";
 import { getAiConfig } from "./ai/ai-config.js";
 import { AI_CONFIG } from "./ai/openai-responses-client.js";
@@ -17,10 +19,23 @@ import { GARMENT_ANALYZER } from "./garment-analyzer/garment-analyzer.provider.j
 import { LocalObjectStorageAdapter } from "./storage/local-object-storage.adapter.js";
 import { OBJECT_STORAGE } from "./storage/object-storage.provider.js";
 import { getStorageConfig, STORAGE_CONFIG } from "./storage/storage-config.js";
+import { getWeatherRuntimeConfig, WEATHER_CONFIG } from "./weather/weather-config.js";
+import { OpenMeteoAdapter } from "./weather/open-meteo.adapter.js";
+import { RedisWeatherCacheAdapter } from "./weather/redis-weather-cache.adapter.js";
+import { WEATHER_CACHE, WEATHER_PROVIDER } from "./weather/weather.provider.js";
 
 @Module({
   imports: [PrismaModule, AuthModule, ContextModule],
-  controllers: [HealthController, HouseholdsController, GarmentsController, GarmentImagesController, OutfitsController, PrivateSetupController],
+  controllers: [
+    HealthController,
+    HouseholdsController,
+    GarmentsController,
+    GarmentImagesController,
+    MeController,
+    OutfitsController,
+    PrivateSetupController,
+    WeatherController
+  ],
   providers: [
     {
       provide: AI_CONFIG,
@@ -29,6 +44,10 @@ import { getStorageConfig, STORAGE_CONFIG } from "./storage/storage-config.js";
     {
       provide: STORAGE_CONFIG,
       useFactory: getStorageConfig
+    },
+    {
+      provide: WEATHER_CONFIG,
+      useFactory: getWeatherRuntimeConfig
     },
     LocalObjectStorageAdapter,
     {
@@ -44,6 +63,16 @@ import { getStorageConfig, STORAGE_CONFIG } from "./storage/storage-config.js";
     {
       provide: GARMENT_ANALYZER,
       useExisting: OpenAIGarmentAnalyzerAdapter
+    },
+    OpenMeteoAdapter,
+    {
+      provide: WEATHER_PROVIDER,
+      useExisting: OpenMeteoAdapter
+    },
+    RedisWeatherCacheAdapter,
+    {
+      provide: WEATHER_CACHE,
+      useExisting: RedisWeatherCacheAdapter
     }
   ]
 })

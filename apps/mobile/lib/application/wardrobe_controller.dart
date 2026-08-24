@@ -4,6 +4,7 @@ import '../data/wardrobe_repository.dart';
 import '../domain/garment.dart';
 import '../domain/interpreted_context.dart';
 import '../domain/outfit_recommendation.dart';
+import '../domain/weather.dart';
 
 class WardrobeController extends ChangeNotifier {
   WardrobeController(this._repository);
@@ -16,6 +17,9 @@ class WardrobeController extends ChangeNotifier {
   String? recommendationStrategy;
   List<OutfitRecommendation> recommendations = const [];
   Map<String, String> feedbackByOutfitId = const {};
+  UserLocation? location;
+  WeatherContext? weather;
+  String? weatherStatus;
   String? pendingImageId;
   GarmentAnalysis? proposedGarment;
 
@@ -78,6 +82,19 @@ class WardrobeController extends ChangeNotifier {
     return _repository.fetchGarmentImage(imageId);
   }
 
+  Future<void> updateLocation(UserLocation nextLocation) async {
+    await _run(() async {
+      location = await _repository.updateLocation(nextLocation);
+      weather = await _repository.fetchCurrentWeather();
+    });
+  }
+
+  Future<void> loadWeather() async {
+    await _run(() async {
+      weather = await _repository.fetchCurrentWeather();
+    });
+  }
+
   Future<void> generateOutfitRecommendations({
     InterpretedContext? context,
   }) async {
@@ -86,6 +103,8 @@ class WardrobeController extends ChangeNotifier {
         context: context,
       );
       recommendationStrategy = result.strategy;
+      weatherStatus = result.weatherStatus;
+      weather = result.weather ?? weather;
       recommendations = result.recommendations;
     });
   }

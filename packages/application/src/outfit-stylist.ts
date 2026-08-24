@@ -6,9 +6,11 @@ import {
   InterpretedContext,
   Outfit,
   OutfitStatus,
-  parseInterpretedContext
+  parseInterpretedContext,
+  WeatherContext
 } from "@closet-ai/domain";
-import { ApplicationPorts } from "./ports.js";
+import { ApplicationPorts, WeatherCachePort, WeatherPort } from "./ports.js";
+import { GetWeatherContextUseCase, WeatherConfig, WeatherProviderFailedError, WeatherStatus } from "./weather.js";
 
 export const MAX_OUTFIT_RECOMMENDATIONS = 3;
 
@@ -35,6 +37,7 @@ export interface OutfitStylistRecommendationCandidate {
 export interface OutfitStylistPort {
   recommend(input: {
     context: InterpretedContext;
+    weather?: WeatherContext;
     garments: OutfitStylistGarmentCandidate[];
     maxRecommendations: number;
   }): Promise<OutfitStylistRecommendationCandidate[]>;
@@ -47,6 +50,8 @@ export enum OutfitRecommendationStrategy {
 
 export interface GenerateOutfitRecommendationsResult {
   strategy: OutfitRecommendationStrategy;
+  weatherStatus: WeatherStatus;
+  weather: WeatherContext | null;
   recommendations: Outfit[];
 }
 
@@ -60,7 +65,8 @@ export class OutfitStylistFailedError extends Error {
 export class GenerateOutfitRecommendationsUseCase {
   constructor(
     private readonly ports: ApplicationPorts,
-    private readonly outfitStylist: OutfitStylistPort
+    private readonly outfitStylist: OutfitStylistPort,
+    private readonly weather?: { provider: WeatherPort; cache: WeatherCachePort; config: WeatherConfig }
   ) {}
 
   async execute(input: { userId: EntityId; context?: InterpretedContext }): Promise<GenerateOutfitRecommendationsResult> {
@@ -71,20 +77,27 @@ export class GenerateOutfitRecommendationsUseCase {
     if (!context) {
       return {
         strategy: OutfitRecommendationStrategy.DETERMINISTIC_FALLBACK,
+        weatherStatus: WeatherStatus.NOT_CONFIGURED,
+        weather: null,
         recommendations: [await this.persistOutfit(input.userId, basicFallbackGarments, 100, "Basic deterministic outfit generated without context-aware AI.")]
       };
     }
+
+    const weatherResult = await this.loadWeather(input.userId);
 
     try {
       const candidates = eligibleGarments.map(toStylistCandidate);
       const recommendations = await this.outfitStylist.recommend({
         context,
+        weather: weatherResult.weather ?? undefined,
         garments: candidates,
         maxRecommendations: MAX_OUTFIT_RECOMMENDATIONS
       });
 
       return {
         strategy: OutfitRecommendationStrategy.AI,
+        weatherStatus: weatherResult.status,
+        weather: weatherResult.weather,
         recommendations: await this.persistAiRecommendations(input.userId, eligibleGarments, recommendations)
       };
     } catch (error) {
@@ -94,8 +107,37 @@ export class GenerateOutfitRecommendationsUseCase {
 
       return {
         strategy: OutfitRecommendationStrategy.DETERMINISTIC_FALLBACK,
+        weatherStatus: weatherResult.status,
+        weather: weatherResult.weather,
         recommendations: [await this.persistOutfit(input.userId, basicFallbackGarments, 100, "Deterministic fallback outfit generated because AI styling was unavailable.")]
       };
+    }
+  }
+
+  private async loadWeather(userId: EntityId): Promise<{ status: WeatherStatus; weather: WeatherContext | null }> {
+    if (!this.weather) {
+      return { status: WeatherStatus.NOT_CONFIGURED, weather: null };
+    }
+
+    try {
+      return {
+        status: WeatherStatus.AVAILABLE,
+        weather: await new GetWeatherContextUseCase(this.ports, this.weather.provider, this.weather.cache, this.weather.config).execute({ userId })
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message === "User location not configured.") {
+        return { status: WeatherStatus.NOT_CONFIGURED, weather: null };
+      }
+
+      if (error instanceof Error && error.message === "User not found.") {
+        throw error;
+      }
+
+      if (error instanceof WeatherProviderFailedError || error instanceof Error) {
+        return { status: WeatherStatus.UNAVAILABLE, weather: null };
+      }
+
+      throw error;
     }
   }
 

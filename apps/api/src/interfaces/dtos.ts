@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
-import { IsArray, IsEnum, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from "class-validator";
+import { IsArray, IsEnum, IsInt, IsNumber, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from "class-validator";
 import {
   ActivityType,
   GarmentCategory,
@@ -159,6 +159,18 @@ export class UserResponseDto {
 
   @ApiProperty()
   displayName!: string;
+
+  @ApiProperty({ nullable: true })
+  city!: string | null;
+
+  @ApiProperty({ nullable: true })
+  latitude!: number | null;
+
+  @ApiProperty({ nullable: true })
+  longitude!: number | null;
+
+  @ApiProperty({ nullable: true })
+  timezone!: string | null;
 
   @ApiProperty()
   createdAt!: Date;
@@ -348,6 +360,75 @@ export class GenerateOutfitRecommendationsResponseDto {
   @ApiProperty({ enum: ["AI", "DETERMINISTIC_FALLBACK"] })
   strategy!: string;
 
+  @ApiProperty({ enum: ["AVAILABLE", "UNAVAILABLE", "NOT_CONFIGURED"] })
+  weatherStatus!: string;
+
+  @ApiProperty({ type: () => WeatherContextResponseDto, nullable: true })
+  weather!: WeatherContextResponseDto | null;
+
   @ApiProperty({ type: [OutfitResponseDto] })
   recommendations!: OutfitResponseDto[];
+}
+
+export class UpdateUserLocationDto {
+  @ApiProperty({ example: "Ciudad de Mexico" })
+  @IsString()
+  @MaxLength(120)
+  city!: string;
+
+  @ApiProperty({ example: 19.4326, minimum: -90, maximum: 90 })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  latitude!: number;
+
+  @ApiProperty({ example: -99.1332, minimum: -180, maximum: 180 })
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  longitude!: number;
+
+  @ApiProperty({ example: "America/Mexico_City" })
+  @IsString()
+  @MaxLength(80)
+  timezone!: string;
+}
+
+export class UserLocationResponseDto {
+  @ApiProperty()
+  city!: string;
+
+  @ApiProperty()
+  latitude!: number;
+
+  @ApiProperty()
+  longitude!: number;
+
+  @ApiProperty()
+  timezone!: string;
+}
+
+export class WeatherContextResponseDto {
+  @ApiProperty()
+  temperature!: number;
+
+  @ApiProperty()
+  apparentTemperature!: number;
+
+  @ApiProperty()
+  minTemperature!: number;
+
+  @ApiProperty()
+  maxTemperature!: number;
+
+  @ApiProperty()
+  rainProbability!: number;
+
+  @ApiProperty()
+  windSpeed!: number;
+
+  @ApiProperty()
+  humidity!: number;
 }

@@ -1,3 +1,5 @@
+import 'weather.dart';
+
 class OutfitItem {
   const OutfitItem({required this.garmentId, required this.position});
 
@@ -52,6 +54,8 @@ class OutfitRecommendation {
 class OutfitRecommendationsResult {
   const OutfitRecommendationsResult({
     required this.strategy,
+    required this.weatherStatus,
+    required this.weather,
     required this.recommendations,
   });
 
@@ -63,6 +67,10 @@ class OutfitRecommendationsResult {
 
     return OutfitRecommendationsResult(
       strategy: json['strategy']! as String,
+      weatherStatus: json['weatherStatus']! as String,
+      weather: json['weather'] == null
+          ? null
+          : WeatherContext.fromJson(json['weather']! as Map<String, Object?>),
       recommendations: recommendations
           .cast<Map<String, Object?>>()
           .map(OutfitRecommendation.fromJson)
@@ -71,6 +79,8 @@ class OutfitRecommendationsResult {
   }
 
   final String strategy;
+  final String weatherStatus;
+  final WeatherContext? weather;
   final List<OutfitRecommendation> recommendations;
 }
 

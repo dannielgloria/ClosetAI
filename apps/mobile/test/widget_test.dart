@@ -6,6 +6,7 @@ import 'package:closet_ai_mobile/domain/auth_user.dart';
 import 'package:closet_ai_mobile/domain/garment.dart';
 import 'package:closet_ai_mobile/domain/interpreted_context.dart';
 import 'package:closet_ai_mobile/domain/outfit_recommendation.dart';
+import 'package:closet_ai_mobile/domain/weather.dart';
 import 'package:closet_ai_mobile/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,6 +16,10 @@ void main() {
   testWidgets('lists and registers garments through the injected repository', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final authRepository = FakeAuthRepository();
     final repository = FakeWardrobeRepository();
 
@@ -61,6 +66,11 @@ void main() {
     expect(repository.createdGarments, 1);
     expect(find.text('White sneakers'), findsOneWidget);
 
+    await tester.scrollUntilVisible(
+      find.text('Interpretar'),
+      300,
+      scrollable: find.byType(Scrollable).last,
+    );
     await tester.tap(find.text('Interpretar'));
     await tester.pumpAndSettle();
 
@@ -98,6 +108,7 @@ void main() {
       500,
       scrollable: find.byType(Scrollable).last,
     );
+    await tester.ensureVisible(find.text('Me gusta'));
     await tester.tap(find.text('Me gusta'));
     await tester.pumpAndSettle();
 
@@ -119,7 +130,7 @@ void main() {
   });
 
   testWidgets('shows a basic error when outfit feedback fails', (tester) async {
-    tester.view.physicalSize = const Size(800, 900);
+    tester.view.physicalSize = const Size(800, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -148,6 +159,11 @@ void main() {
     );
     await tester.tap(find.text('Sign in'));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Interpretar'),
+      300,
+      scrollable: find.byType(Scrollable).last,
+    );
     await tester.tap(find.text('Interpretar'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
@@ -162,6 +178,7 @@ void main() {
       500,
       scrollable: find.byType(Scrollable).last,
     );
+    await tester.ensureVisible(find.text('Me gusta'));
     await tester.tap(find.text('Me gusta'));
     await tester.pumpAndSettle();
 
@@ -224,6 +241,44 @@ void main() {
       expect(find.text('ivory top'), findsOneWidget);
     },
   );
+
+  testWidgets('configures weather location and displays current weather', (
+    tester,
+  ) async {
+    final repository = FakeWardrobeRepository();
+
+    await tester.pumpWidget(
+      ClosetAiApp(
+        authController: AuthController(FakeAuthRepository()),
+        wardrobeRepository: repository,
+        contextRepository: FakeContextRepository(),
+        pickGarmentImage: (_) async => null,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Email'),
+      'user@example.com',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Password'),
+      'correct-password',
+    );
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Location'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'City'),
+      'Ciudad de Mexico',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(repository.lastLocation?.city, 'Ciudad de Mexico');
+    expect(find.text('18°C, rain 45%'), findsOneWidget);
+  });
 }
 
 class FakeWardrobeRepository implements WardrobeRepository {
@@ -301,6 +356,16 @@ class FakeWardrobeRepository implements WardrobeRepository {
   }) async {
     return const OutfitRecommendationsResult(
       strategy: 'AI',
+      weatherStatus: 'AVAILABLE',
+      weather: WeatherContext(
+        temperature: 18,
+        apparentTemperature: 17,
+        minTemperature: 14,
+        maxTemperature: 22,
+        rainProbability: 45,
+        windSpeed: 12,
+        humidity: 68,
+      ),
       recommendations: [
         OutfitRecommendation(
           id: 'outfit-1',
@@ -453,6 +518,27 @@ class FakeWardrobeRepository implements WardrobeRepository {
       130,
     ];
   }
+
+  @override
+  Future<UserLocation> updateLocation(UserLocation location) async {
+    lastLocation = location;
+    return location;
+  }
+
+  @override
+  Future<WeatherContext> fetchCurrentWeather() async {
+    return const WeatherContext(
+      temperature: 18,
+      apparentTemperature: 17,
+      minTemperature: 14,
+      maxTemperature: 22,
+      rainProbability: 45,
+      windSpeed: 12,
+      humidity: 68,
+    );
+  }
+
+  UserLocation? lastLocation;
 }
 
 class FakeAuthRepository implements AuthRepository {

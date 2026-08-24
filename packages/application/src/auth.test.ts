@@ -53,7 +53,10 @@ class AuthPorts implements ApplicationPorts, UnitOfWorkPort {
     create: async () => {
       throw new Error("not implemented");
     },
-    findById: async (id: string) => this.usersById.get(id) ?? null
+    findById: async (id: string) => this.usersById.get(id) ?? null,
+    updateLocation: async () => {
+      throw new Error("not implemented");
+    }
   };
   userCredentials = {
     create: async (input: { userId: string; email: string; passwordHash: string }) => {
@@ -157,18 +160,30 @@ describe("Authentication use cases", () => {
       id: "user-1",
       householdId: "household-1",
       displayName: "Dann",
+      city: null,
+      latitude: null,
+      longitude: null,
+      timezone: null,
       createdAt: new Date("2026-08-24T00:00:00.000Z")
     });
     ports.usersById.set("user-2", {
       id: "user-2",
       householdId: "household-1",
       displayName: "Second",
+      city: null,
+      latitude: null,
+      longitude: null,
+      timezone: null,
       createdAt: new Date("2026-08-24T00:00:00.000Z")
     });
     ports.usersById.set("user-3", {
       id: "user-3",
       householdId: "household-2",
       displayName: "Other",
+      city: null,
+      latitude: null,
+      longitude: null,
+      timezone: null,
       createdAt: new Date("2026-08-24T00:00:00.000Z")
     });
   });
