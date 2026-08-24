@@ -1,0 +1,167 @@
+import { Injectable } from "@nestjs/common";
+import { Prisma, PrismaClient } from "@prisma/client";
+import {
+  ApplicationPorts,
+  GarmentRepositoryPort,
+  HouseholdRepositoryPort,
+  OutfitRepositoryPort,
+  UnitOfWorkPort,
+  UsageEventRepositoryPort,
+  UserRepositoryPort
+} from "@closet-ai/application";
+import { GarmentStatus } from "@closet-ai/domain";
+import { PrismaService } from "./prisma.service.js";
+import { mapGarment, mapHousehold, mapOutfit, mapUsageEvent, mapUser } from "./mappers.js";
+
+type PrismaTransactionClient = Prisma.TransactionClient;
+type DbClient = PrismaClient | PrismaTransactionClient;
+
+@Injectable()
+export class ApplicationPortFactory implements UnitOfWorkPort {
+  constructor(private readonly prisma: PrismaService) {}
+
+  create(db: DbClient = this.prisma): ApplicationPorts {
+    return {
+      households: this.createHouseholdRepository(db),
+      users: this.createUserRepository(db),
+      garments: this.createGarmentRepository(db),
+      outfits: this.createOutfitRepository(db),
+      usageEvents: this.createUsageEventRepository(db)
+    };
+  }
+
+  transaction<T>(work: (ports: ApplicationPorts) => Promise<T>): Promise<T> {
+    return this.prisma.$transaction((tx) => work(this.create(tx)));
+  }
+
+  private createHouseholdRepository(db: DbClient): HouseholdRepositoryPort {
+    return {
+      createWithInitialUser: async (input) => {
+        const household = await db.household.create({
+          data: {
+            name: input.name,
+            users: {
+              create: {
+                displayName: input.initialUserDisplayName
+              }
+            }
+          },
+          include: { users: true }
+        });
+
+        return { household: mapHousehold(household), user: mapUser(household.users[0]) };
+      },
+      findById: async (id) => {
+        const row = await db.household.findUnique({ where: { id } });
+        return row ? mapHousehold(row) : null;
+      }
+    };
+  }
+
+  private createUserRepository(db: DbClient): UserRepositoryPort {
+    return {
+      create: async (input) => mapUser(await db.user.create({ data: { householdId: input.householdId, displayName: input.displayName } })),
+      findById: async (id) => {
+        const row = await db.user.findUnique({ where: { id } });
+        return row ? mapUser(row) : null;
+      }
+    };
+  }
+
+  private createGarmentRepository(db: DbClient): GarmentRepositoryPort {
+    return {
+      create: async (input) =>
+        mapGarment(
+          await db.garment.create({
+            data: {
+              userId: input.userId,
+              category: input.category,
+              primaryColor: input.primaryColor,
+              status: input.status,
+              name: input.name
+            }
+          })
+        ),
+      findAvailableByUserId: async (userId) =>
+        (
+          await db.garment.findMany({
+            where: { userId, status: { in: [GarmentStatus.CLEAN_AVAILABLE, GarmentStatus.WORN_REUSABLE] } },
+            orderBy: [{ category: "asc" }, { createdAt: "asc" }]
+          })
+        ).map(mapGarment),
+      findByIds: async (ids) => (await db.garment.findMany({ where: { id: { in: ids } } })).map(mapGarment),
+      save: async (garment) =>
+        mapGarment(
+          await db.garment.update({
+            where: { id: garment.id },
+            data: {
+              status: garment.status,
+              wearCount: garment.wearCount,
+              lastWornAt: garment.lastWornAt
+            }
+          })
+        )
+    };
+  }
+
+  private createOutfitRepository(db: DbClient): OutfitRepositoryPort {
+    return {
+      create: async (input) =>
+        mapOutfit(
+          await db.outfit.create({
+            data: {
+              userId: input.userId,
+              explanation: input.explanation,
+              score: input.score,
+              items: {
+                create: input.garmentIds.map((garmentId, position) => ({ garmentId, position }))
+              }
+            },
+            include: { items: { orderBy: { position: "asc" } } }
+          })
+        ),
+      findById: async (id) => {
+        const row = await db.outfit.findUnique({ where: { id }, include: { items: { orderBy: { position: "asc" } } } });
+        return row ? mapOutfit(row) : null;
+      },
+      save: async (outfit) =>
+        mapOutfit(
+          await db.outfit.update({
+            where: { id: outfit.id },
+            data: {
+              status: outfit.status,
+              selectedAt: outfit.selectedAt,
+              wornAt: outfit.wornAt
+            },
+            include: { items: { orderBy: { position: "asc" } } }
+          })
+        )
+    };
+  }
+
+  private createUsageEventRepository(db: DbClient): UsageEventRepositoryPort {
+    return {
+      createManyIfAbsent: async (events) => {
+        await db.garmentUsageEvent.createMany({
+          data: events.map((event) => ({
+            userId: event.userId,
+            garmentId: event.garmentId,
+            outfitId: event.outfitId,
+            wornAt: event.wornAt,
+            context: event.context as Prisma.InputJsonValue
+          })),
+          skipDuplicates: true
+        });
+
+        return (
+          await db.garmentUsageEvent.findMany({
+            where: { outfitId: events[0]?.outfitId },
+            orderBy: { wornAt: "asc" }
+          })
+        ).map(mapUsageEvent);
+      },
+      findByOutfitId: async (outfitId) =>
+        (await db.garmentUsageEvent.findMany({ where: { outfitId }, orderBy: { wornAt: "asc" } })).map(mapUsageEvent)
+    };
+  }
+}

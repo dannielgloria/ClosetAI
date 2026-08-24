@@ -1,0 +1,24 @@
+{
+  "name": "closet-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Closet AI monorepo",
+  "license": "MIT",
+  "scripts": {
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "prisma": "^6.14.0",
+    "typescript": "^5.9.2"
+  },
+  "packageManager": "pnpm@10.28.2",
+  "dependencies": {
+    "@prisma/client": "6.19.3"
+  }
+}

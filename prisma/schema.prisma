@@ -1,0 +1,130 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum GarmentCategory {
+  TOP
+  BOTTOM
+  OUTERWEAR
+  FOOTWEAR
+  UNDERWEAR
+  ACCESSORY
+  SPORTSWEAR
+  FORMALWEAR
+  SLEEPWEAR
+}
+
+enum GarmentStatus {
+  CLEAN_AVAILABLE
+  WORN_REUSABLE
+  LAUNDRY_BIN
+  WASHING
+  DRYING
+  CLEAN_PENDING_STORAGE
+  UNAVAILABLE
+  REPAIR
+  RETIRED
+  DONATED
+  DISCARDED
+}
+
+enum OutfitStatus {
+  GENERATED
+  PRESENTED
+  SELECTED
+  WORN
+  REJECTED
+  CANCELLED
+}
+
+model Household {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  users     User[]
+
+  @@map("households")
+}
+
+model User {
+  id          String    @id @default(uuid())
+  householdId String    @map("household_id")
+  displayName String    @map("display_name")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  garments    Garment[]
+  outfits     Outfit[]
+
+  @@index([householdId])
+  @@map("users")
+}
+
+model Garment {
+  id           String              @id @default(uuid())
+  userId       String              @map("user_id")
+  category     GarmentCategory
+  primaryColor String              @map("primary_color")
+  status       GarmentStatus       @default(CLEAN_AVAILABLE)
+  name         String?
+  wearCount    Int                 @default(0) @map("wear_count")
+  lastWornAt   DateTime?           @map("last_worn_at")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outfitItems  OutfitItem[]
+  usageEvents  GarmentUsageEvent[]
+
+  @@index([userId, status])
+  @@map("garments")
+}
+
+model Outfit {
+  id          String              @id @default(uuid())
+  userId      String              @map("user_id")
+  status      OutfitStatus        @default(GENERATED)
+  explanation String
+  score       Int
+  selectedAt  DateTime?           @map("selected_at")
+  wornAt      DateTime?           @map("worn_at")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items       OutfitItem[]
+  usageEvents GarmentUsageEvent[]
+
+  @@index([userId, status])
+  @@map("outfits")
+}
+
+model OutfitItem {
+  id        String  @id @default(uuid())
+  outfitId  String  @map("outfit_id")
+  garmentId String  @map("garment_id")
+  position  Int
+  outfit    Outfit  @relation(fields: [outfitId], references: [id], onDelete: Cascade)
+  garment   Garment @relation(fields: [garmentId], references: [id], onDelete: Restrict)
+
+  @@unique([outfitId, garmentId])
+  @@index([garmentId])
+  @@map("outfit_items")
+}
+
+model GarmentUsageEvent {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  garmentId String   @map("garment_id")
+  outfitId  String   @map("outfit_id")
+  wornAt    DateTime @map("worn_at")
+  context   Json     @default("{}")
+  garment   Garment  @relation(fields: [garmentId], references: [id], onDelete: Restrict)
+  outfit    Outfit   @relation(fields: [outfitId], references: [id], onDelete: Cascade)
+
+  @@unique([outfitId, garmentId])
+  @@index([userId, wornAt])
+  @@map("garment_usage_events")
+}

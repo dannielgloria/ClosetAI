@@ -1,0 +1,55 @@
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+.turbo/
+.nx/
+.parcel-cache/
+.vite/
+.eslintcache
+.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+
+# IDEs/editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Docker/local runtime data
+data/
+*.pid
+
+# Prisma
+prisma/dev.db
+prisma/dev.db-journal
+
+# Flutter/Dart
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/build/
+**/coverage/
+**/.pub-cache/
+**/.pub/
+
+# Flutter platform build artifacts
+**/android/.gradle/
+**/android/local.properties
+**/android/key.properties
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Pods/
+**/ios/.symlinks/
+**/macos/Flutter/ephemeral/
