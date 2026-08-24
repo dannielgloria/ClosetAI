@@ -6,6 +6,7 @@ import {
   GarmentCategory,
   GarmentStatus,
   markGarmentWorn,
+  OutfitStatus,
   selectOutfit
 } from "@closet-ai/domain";
 import { ApplicationPorts, UnitOfWorkPort } from "./ports.js";
@@ -64,6 +65,14 @@ export class ListAvailableGarmentsUseCase {
   }
 }
 
+export class ListGarmentsUseCase {
+  constructor(private readonly ports: ApplicationPorts) {}
+
+  execute(input: { userId: EntityId }): Promise<Garment[]> {
+    return this.ports.garments.findByUserId(input.userId);
+  }
+}
+
 export class GenerateBasicOutfitUseCase {
   constructor(private readonly ports: ApplicationPorts) {}
 
@@ -94,10 +103,7 @@ export class SelectOutfitUseCase {
 }
 
 export class ConfirmOutfitUsageUseCase {
-  constructor(
-    private readonly unitOfWork: UnitOfWorkPort,
-    private readonly ports: ApplicationPorts
-  ) {}
+  constructor(private readonly unitOfWork: UnitOfWorkPort) {}
 
   async execute(input: { outfitId: EntityId; userId: EntityId; wornGarmentIds?: EntityId[]; context?: Record<string, unknown> }) {
     return this.unitOfWork.transaction(async (ports) => {
@@ -106,7 +112,7 @@ export class ConfirmOutfitUsageUseCase {
         throw new Error("Outfit not found.");
       }
 
-      if (outfit.status === "WORN") {
+      if (outfit.status === OutfitStatus.WORN) {
         const existingEvents = await ports.usageEvents.findByOutfitId(outfit.id);
         return { outfit, usageEvents: existingEvents };
       }

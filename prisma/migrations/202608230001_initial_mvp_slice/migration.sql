@@ -34,23 +34,23 @@ CREATE TYPE "OutfitStatus" AS ENUM (
 );
 
 CREATE TABLE "households" (
-  "id" TEXT NOT NULL DEFAULT gen_random_uuid(),
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "name" TEXT NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "households_pkey" PRIMARY KEY ("id")
 );
 
 CREATE TABLE "users" (
-  "id" TEXT NOT NULL DEFAULT gen_random_uuid(),
-  "household_id" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "household_id" UUID NOT NULL,
   "display_name" TEXT NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );
 
 CREATE TABLE "garments" (
-  "id" TEXT NOT NULL DEFAULT gen_random_uuid(),
-  "user_id" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "user_id" UUID NOT NULL,
   "category" "GarmentCategory" NOT NULL,
   "primary_color" TEXT NOT NULL,
   "status" "GarmentStatus" NOT NULL DEFAULT 'CLEAN_AVAILABLE',
@@ -63,8 +63,8 @@ CREATE TABLE "garments" (
 );
 
 CREATE TABLE "outfits" (
-  "id" TEXT NOT NULL DEFAULT gen_random_uuid(),
-  "user_id" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "user_id" UUID NOT NULL,
   "status" "OutfitStatus" NOT NULL DEFAULT 'GENERATED',
   "explanation" TEXT NOT NULL,
   "score" INTEGER NOT NULL,
@@ -76,18 +76,18 @@ CREATE TABLE "outfits" (
 );
 
 CREATE TABLE "outfit_items" (
-  "id" TEXT NOT NULL DEFAULT gen_random_uuid(),
-  "outfit_id" TEXT NOT NULL,
-  "garment_id" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "outfit_id" UUID NOT NULL,
+  "garment_id" UUID NOT NULL,
   "position" INTEGER NOT NULL,
   CONSTRAINT "outfit_items_pkey" PRIMARY KEY ("id")
 );
 
 CREATE TABLE "garment_usage_events" (
-  "id" TEXT NOT NULL DEFAULT gen_random_uuid(),
-  "user_id" TEXT NOT NULL,
-  "garment_id" TEXT NOT NULL,
-  "outfit_id" TEXT NOT NULL,
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+  "user_id" UUID NOT NULL,
+  "garment_id" UUID NOT NULL,
+  "outfit_id" UUID NOT NULL,
   "worn_at" TIMESTAMP(3) NOT NULL,
   "context" JSONB NOT NULL DEFAULT '{}',
   CONSTRAINT "garment_usage_events_pkey" PRIMARY KEY ("id")
@@ -106,5 +106,6 @@ ALTER TABLE "garments" ADD CONSTRAINT "garments_user_id_fkey" FOREIGN KEY ("user
 ALTER TABLE "outfits" ADD CONSTRAINT "outfits_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "outfit_items" ADD CONSTRAINT "outfit_items_outfit_id_fkey" FOREIGN KEY ("outfit_id") REFERENCES "outfits"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "outfit_items" ADD CONSTRAINT "outfit_items_garment_id_fkey" FOREIGN KEY ("garment_id") REFERENCES "garments"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "garment_usage_events" ADD CONSTRAINT "garment_usage_events_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "garment_usage_events" ADD CONSTRAINT "garment_usage_events_garment_id_fkey" FOREIGN KEY ("garment_id") REFERENCES "garments"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE "garment_usage_events" ADD CONSTRAINT "garment_usage_events_outfit_id_fkey" FOREIGN KEY ("outfit_id") REFERENCES "outfits"("id") ON DELETE CASCADE ON UPDATE CASCADE;

@@ -50,6 +50,7 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
           garment.userId === userId &&
           [GarmentStatus.CLEAN_AVAILABLE, GarmentStatus.WORN_REUSABLE].includes(garment.status)
       ),
+    findByUserId: async (userId: string) => [...this.garmentRows.values()].filter((garment) => garment.userId === userId),
     findByIds: async (ids: string[]) => ids.map((id) => this.garmentRows.get(id)).filter((row): row is Garment => Boolean(row)),
     save: async (garment: Garment) => {
       this.garmentRows.set(garment.id, garment);
@@ -156,11 +157,28 @@ describe("MVP use cases", () => {
     const outfit = await ports.outfits.create({ userId: "user-1", garmentIds: [top.id], explanation: "Basic", score: 100 });
     const selected = await new SelectOutfitUseCase(ports).execute({ outfitId: outfit.id, userId: "user-1" });
 
-    const useCase = new ConfirmOutfitUsageUseCase(ports, ports);
+    const useCase = new ConfirmOutfitUsageUseCase(ports);
     await useCase.execute({ outfitId: selected.id, userId: "user-1" });
     await useCase.execute({ outfitId: selected.id, userId: "user-1" });
 
     expect(ports.usageEventRows.size).toBe(1);
     expect(ports.garmentRows.get(top.id)?.wearCount).toBe(1);
+  });
+
+  it("confirms partial outfit usage for only the garments actually worn", async () => {
+    const top = await ports.garments.create({ userId: "user-1", category: GarmentCategory.TOP, primaryColor: "black", status: GarmentStatus.CLEAN_AVAILABLE });
+    const bottom = await ports.garments.create({ userId: "user-1", category: GarmentCategory.BOTTOM, primaryColor: "blue", status: GarmentStatus.CLEAN_AVAILABLE });
+    const outfit = await ports.outfits.create({ userId: "user-1", garmentIds: [top.id, bottom.id], explanation: "Basic", score: 100 });
+    const selected = await new SelectOutfitUseCase(ports).execute({ outfitId: outfit.id, userId: "user-1" });
+
+    await new ConfirmOutfitUsageUseCase(ports).execute({
+      outfitId: selected.id,
+      userId: "user-1",
+      wornGarmentIds: [top.id]
+    });
+
+    expect(ports.usageEventRows.size).toBe(1);
+    expect(ports.garmentRows.get(top.id)?.wearCount).toBe(1);
+    expect(ports.garmentRows.get(bottom.id)?.wearCount).toBe(0);
   });
 });

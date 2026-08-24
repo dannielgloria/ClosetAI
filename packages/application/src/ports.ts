@@ -30,6 +30,7 @@ export interface GarmentRepositoryPort {
     status: Garment["status"];
     name?: string;
   }): Promise<Garment>;
+  findByUserId(userId: EntityId): Promise<Garment[]>;
   findAvailableByUserId(userId: EntityId): Promise<Garment[]>;
   findByIds(ids: EntityId[]): Promise<Garment[]>;
   save(garment: Garment): Promise<Garment>;

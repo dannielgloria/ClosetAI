@@ -43,7 +43,7 @@ enum OutfitStatus {
 }
 
 model Household {
-  id        String   @id @default(uuid())
+  id        String   @id @default(uuid()) @db.Uuid
   name      String
   createdAt DateTime @default(now()) @map("created_at")
   users     User[]
@@ -52,21 +52,22 @@ model Household {
 }
 
 model User {
-  id          String    @id @default(uuid())
-  householdId String    @map("household_id")
+  id          String    @id @default(uuid()) @db.Uuid
+  householdId String    @map("household_id") @db.Uuid
   displayName String    @map("display_name")
   createdAt   DateTime  @default(now()) @map("created_at")
   household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
   garments    Garment[]
   outfits     Outfit[]
+  usageEvents GarmentUsageEvent[]
 
   @@index([householdId])
   @@map("users")
 }
 
 model Garment {
-  id           String              @id @default(uuid())
-  userId       String              @map("user_id")
+  id           String              @id @default(uuid()) @db.Uuid
+  userId       String              @map("user_id") @db.Uuid
   category     GarmentCategory
   primaryColor String              @map("primary_color")
   status       GarmentStatus       @default(CLEAN_AVAILABLE)
@@ -84,8 +85,8 @@ model Garment {
 }
 
 model Outfit {
-  id          String              @id @default(uuid())
-  userId      String              @map("user_id")
+  id          String              @id @default(uuid()) @db.Uuid
+  userId      String              @map("user_id") @db.Uuid
   status      OutfitStatus        @default(GENERATED)
   explanation String
   score       Int
@@ -102,9 +103,9 @@ model Outfit {
 }
 
 model OutfitItem {
-  id        String  @id @default(uuid())
-  outfitId  String  @map("outfit_id")
-  garmentId String  @map("garment_id")
+  id        String  @id @default(uuid()) @db.Uuid
+  outfitId  String  @map("outfit_id") @db.Uuid
+  garmentId String  @map("garment_id") @db.Uuid
   position  Int
   outfit    Outfit  @relation(fields: [outfitId], references: [id], onDelete: Cascade)
   garment   Garment @relation(fields: [garmentId], references: [id], onDelete: Restrict)
@@ -115,12 +116,13 @@ model OutfitItem {
 }
 
 model GarmentUsageEvent {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  garmentId String   @map("garment_id")
-  outfitId  String   @map("outfit_id")
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  garmentId String   @map("garment_id") @db.Uuid
+  outfitId  String   @map("outfit_id") @db.Uuid
   wornAt    DateTime @map("worn_at")
   context   Json     @default("{}")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   garment   Garment  @relation(fields: [garmentId], references: [id], onDelete: Restrict)
   outfit    Outfit   @relation(fields: [outfitId], references: [id], onDelete: Cascade)
 

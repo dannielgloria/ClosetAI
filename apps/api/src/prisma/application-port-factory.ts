@@ -82,6 +82,13 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
             }
           })
         ),
+      findByUserId: async (userId) =>
+        (
+          await db.garment.findMany({
+            where: { userId },
+            orderBy: [{ category: "asc" }, { createdAt: "asc" }]
+          })
+        ).map(mapGarment),
       findAvailableByUserId: async (userId) =>
         (
           await db.garment.findMany({

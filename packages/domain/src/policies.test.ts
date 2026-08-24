@@ -79,4 +79,26 @@ describe("outfit usage", () => {
 
     expect(confirmOutfitUsage(worn, new Date("2026-08-24T00:00:00.000Z"))).toBe(worn);
   });
+
+  it("rejects confirming usage before an outfit is selected", () => {
+    const now = new Date("2026-08-23T00:00:00.000Z");
+
+    expect(() =>
+      confirmOutfitUsage(
+        {
+          id: "outfit-1",
+          userId: "user-1",
+          status: OutfitStatus.GENERATED,
+          items: [],
+          explanation: "Basic outfit",
+          score: 100,
+          selectedAt: null,
+          wornAt: null,
+          createdAt: now,
+          updatedAt: now
+        },
+        now
+      )
+    ).toThrow("Only a selected outfit can be confirmed as worn.");
+  });
 });
