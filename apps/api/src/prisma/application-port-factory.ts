@@ -5,6 +5,7 @@ import {
   AuthSessionRepositoryPort,
   GarmentImageRepositoryPort,
   GarmentRepositoryPort,
+  GarmentStateTransitionRepositoryPort,
   HouseholdRepositoryPort,
   OutfitFeedbackRepositoryPort,
   OutfitRepositoryPort,
@@ -19,6 +20,7 @@ import {
   mapAuthSession,
   mapGarment,
   mapGarmentImage,
+  mapGarmentStateTransition,
   mapHousehold,
   mapOutfit,
   mapOutfitFeedback,
@@ -44,7 +46,8 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
       garmentImages: this.createGarmentImageRepository(db),
       outfits: this.createOutfitRepository(db),
       usageEvents: this.createUsageEventRepository(db),
-      outfitFeedback: this.createOutfitFeedbackRepository(db)
+      outfitFeedback: this.createOutfitFeedbackRepository(db),
+      garmentStateTransitions: this.createGarmentStateTransitionRepository(db)
     };
   }
 
@@ -216,6 +219,31 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
             include: { images: { orderBy: { createdAt: "asc" }, take: 1 } }
           })
         ).map(mapGarment),
+      findById: async (id) => {
+        const row = await db.garment.findUnique({
+          where: { id },
+          include: { images: { orderBy: { createdAt: "asc" }, take: 1 } }
+        });
+        return row ? mapGarment(row) : null;
+      },
+      updateMetadata: async (garmentId, metadata) =>
+        mapGarment(
+          await db.garment.update({
+            where: { id: garmentId },
+            data: {
+              category: metadata.category,
+              primaryColor: metadata.primaryColor,
+              secondaryColors: metadata.secondaryColors,
+              subcategory: metadata.subcategory,
+              pattern: metadata.pattern,
+              fit: metadata.fit,
+              estimatedMaterial: metadata.estimatedMaterial,
+              formality: metadata.formality,
+              name: metadata.name
+            },
+            include: { images: { orderBy: { createdAt: "asc" }, take: 1 } }
+          })
+        ),
       save: async (garment) =>
         mapGarment(
           await db.garment.update({
@@ -224,7 +252,8 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
               status: garment.status,
               wearCount: garment.wearCount,
               lastWornAt: garment.lastWornAt
-            }
+            },
+            include: { images: { orderBy: { createdAt: "asc" }, take: 1 } }
           })
         )
     };
@@ -334,6 +363,30 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
         ),
       findByOutfitId: async (outfitId) =>
         (await db.outfitFeedback.findMany({ where: { outfitId }, orderBy: { createdAt: "asc" } })).map(mapOutfitFeedback)
+    };
+  }
+
+  private createGarmentStateTransitionRepository(db: DbClient): GarmentStateTransitionRepositoryPort {
+    return {
+      create: async (input) =>
+        mapGarmentStateTransition(
+          await db.garmentStateTransition.create({
+            data: {
+              garmentId: input.garmentId,
+              userId: input.userId,
+              fromStatus: input.fromStatus,
+              toStatus: input.toStatus,
+              transition: input.transition
+            }
+          })
+        ),
+      findByGarmentId: async (garmentId) =>
+        (
+          await db.garmentStateTransition.findMany({
+            where: { garmentId },
+            orderBy: { createdAt: "asc" }
+          })
+        ).map(mapGarmentStateTransition)
     };
   }
 }

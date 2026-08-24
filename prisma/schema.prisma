@@ -33,6 +33,22 @@ enum GarmentStatus {
   DISCARDED
 }
 
+enum GarmentStateTransitionType {
+  MARK_WORN_REUSABLE
+  SEND_TO_LAUNDRY
+  START_WASHING
+  START_DRYING
+  MARK_CLEAN_PENDING_STORAGE
+  MARK_CLEAN_AVAILABLE
+  MARK_UNAVAILABLE
+  SEND_TO_REPAIR
+  RETURN_FROM_REPAIR
+  RETIRE
+  RESTORE
+  DONATE
+  DISCARD
+}
+
 enum GarmentSubcategory {
   T_SHIRT
   SHIRT
@@ -104,22 +120,23 @@ model Household {
 }
 
 model User {
-  id             String              @id @default(uuid()) @db.Uuid
-  householdId    String              @map("household_id") @db.Uuid
-  displayName    String              @map("display_name")
-  city           String?
-  latitude       Float?
-  longitude      Float?
-  timezone       String?
-  createdAt      DateTime            @default(now()) @map("created_at")
-  household      Household           @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  garments       Garment[]
-  outfits        Outfit[]
-  usageEvents    GarmentUsageEvent[]
-  credential     UserCredential?
-  authSessions   AuthSession[]
-  outfitFeedback OutfitFeedback[]
-  garmentImages  GarmentImage[]
+  id                      String                   @id @default(uuid()) @db.Uuid
+  householdId             String                   @map("household_id") @db.Uuid
+  displayName             String                   @map("display_name")
+  city                    String?
+  latitude                Float?
+  longitude               Float?
+  timezone                String?
+  createdAt               DateTime                 @default(now()) @map("created_at")
+  household               Household                @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  garments                Garment[]
+  outfits                 Outfit[]
+  usageEvents             GarmentUsageEvent[]
+  credential              UserCredential?
+  authSessions            AuthSession[]
+  outfitFeedback          OutfitFeedback[]
+  garmentImages           GarmentImage[]
+  garmentStateTransitions GarmentStateTransition[]
 
   @@index([householdId])
   @@map("users")
@@ -157,29 +174,46 @@ model AuthSession {
 }
 
 model Garment {
-  id                String              @id @default(uuid()) @db.Uuid
-  userId            String              @map("user_id") @db.Uuid
+  id                String                   @id @default(uuid()) @db.Uuid
+  userId            String                   @map("user_id") @db.Uuid
   category          GarmentCategory
   subcategory       GarmentSubcategory?
-  primaryColor      String              @map("primary_color")
-  secondaryColors   String[]            @default([]) @map("secondary_colors")
+  primaryColor      String                   @map("primary_color")
+  secondaryColors   String[]                 @default([]) @map("secondary_colors")
   pattern           GarmentPattern?
   fit               GarmentFit?
-  estimatedMaterial GarmentMaterial?    @map("estimated_material")
+  estimatedMaterial GarmentMaterial?         @map("estimated_material")
   formality         Int?
-  status            GarmentStatus       @default(CLEAN_AVAILABLE)
+  status            GarmentStatus            @default(CLEAN_AVAILABLE)
   name              String?
-  wearCount         Int                 @default(0) @map("wear_count")
-  lastWornAt        DateTime?           @map("last_worn_at")
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
-  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wearCount         Int                      @default(0) @map("wear_count")
+  lastWornAt        DateTime?                @map("last_worn_at")
+  createdAt         DateTime                 @default(now()) @map("created_at")
+  updatedAt         DateTime                 @updatedAt @map("updated_at")
+  user              User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
   images            GarmentImage[]
   outfitItems       OutfitItem[]
   usageEvents       GarmentUsageEvent[]
+  stateTransitions  GarmentStateTransition[]
 
   @@index([userId, status])
   @@map("garments")
+}
+
+model GarmentStateTransition {
+  id         String                     @id @default(uuid()) @db.Uuid
+  garmentId  String                     @map("garment_id") @db.Uuid
+  userId     String                     @map("user_id") @db.Uuid
+  fromStatus GarmentStatus              @map("from_status")
+  toStatus   GarmentStatus              @map("to_status")
+  transition GarmentStateTransitionType
+  createdAt  DateTime                   @default(now()) @map("created_at")
+  garment    Garment                    @relation(fields: [garmentId], references: [id], onDelete: Cascade)
+  user       User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([garmentId, createdAt])
+  @@index([userId, createdAt])
+  @@map("garment_state_transitions")
 }
 
 model GarmentImage {

@@ -430,6 +430,7 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
                 _GarmentTile(
                   garment: garment,
                   fetchImage: _controller.fetchGarmentImage,
+                  onTap: () => _showGarmentDetail(garment),
                 ),
             const SizedBox(height: 28),
             Text(
@@ -703,6 +704,85 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
       formality: result.formality,
     );
   }
+
+  Future<void> _showGarmentDetail(Garment garment) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _GarmentDetailSheet(
+        garment: garment,
+        fetchImage: _controller.fetchGarmentImage,
+        onEdit: _editGarment,
+        onTransition: _transitionGarment,
+      ),
+    );
+  }
+
+  Future<void> _editGarment(Garment garment) async {
+    final result = await showDialog<_CreateGarmentInput>(
+      context: context,
+      builder: (context) => _CreateGarmentDialog(initialGarment: garment),
+    );
+
+    if (result == null) {
+      return;
+    }
+
+    await _controller.updateGarment(
+      garmentId: garment.id,
+      category: result.category,
+      primaryColor: result.primaryColor,
+      name: result.name,
+      secondaryColors: result.secondaryColors,
+      subcategory: result.subcategory,
+      pattern: result.pattern,
+      fit: result.fit,
+      estimatedMaterial: result.estimatedMaterial,
+      formality: result.formality,
+    );
+    if (mounted && _controller.errorMessage == null) {
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  Future<void> _transitionGarment(
+    Garment garment,
+    String transition, {
+    bool requiresConfirmation = false,
+  }) async {
+    if (requiresConfirmation) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Confirm action'),
+          content: const Text(
+            'Esta acción retirará permanentemente la prenda del guardarropa activo.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Confirm'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) {
+        return;
+      }
+    }
+
+    await _controller.transitionGarment(
+      garmentId: garment.id,
+      transition: transition,
+    );
+    if (mounted && _controller.errorMessage == null) {
+      Navigator.of(context).maybePop();
+    }
+  }
 }
 
 class _LocationDialog extends StatefulWidget {
@@ -796,6 +876,181 @@ class _LocationDialogState extends State<_LocationDialog> {
   }
 }
 
+class _GarmentDetailSheet extends StatelessWidget {
+  const _GarmentDetailSheet({
+    required this.garment,
+    required this.fetchImage,
+    required this.onEdit,
+    required this.onTransition,
+  });
+
+  final Garment garment;
+  final Future<List<int>> Function(String imageId) fetchImage;
+  final Future<void> Function(Garment garment) onEdit;
+  final Future<void> Function(
+    Garment garment,
+    String transition, {
+    bool requiresConfirmation,
+  })
+  onTransition;
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = _validLifecycleActions(garment.status);
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            if (garment.imageId != null)
+              FutureBuilder<List<int>>(
+                future: fetchImage(garment.imageId!),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const SizedBox(
+                      height: 180,
+                      child: Center(child: Icon(Icons.image_outlined)),
+                    );
+                  }
+
+                  return ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.memory(
+                      Uint8List.fromList(snapshot.data!),
+                      height: 220,
+                      fit: BoxFit.cover,
+                    ),
+                  );
+                },
+              ),
+            const SizedBox(height: 16),
+            Text(
+              garment.name?.trim().isNotEmpty == true
+                  ? garment.name!
+                  : '${garment.primaryColor} ${garment.category.toLowerCase()}',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            _detailLine('Category', garment.category),
+            _detailLine('Subcategory', garment.subcategory ?? 'Unknown'),
+            _detailLine(
+              'Colors',
+              [garment.primaryColor, ...garment.secondaryColors].join(', '),
+            ),
+            _detailLine('Fit', garment.fit ?? 'Unknown'),
+            _detailLine('Material', garment.estimatedMaterial ?? 'Unknown'),
+            _detailLine(
+              'Formality',
+              garment.formality?.toString() ?? 'Unknown',
+            ),
+            _detailLine('Status', garment.status),
+            _detailLine('Wear count', garment.wearCount.toString()),
+            _detailLine('Last worn', garment.lastWornAt?.toString() ?? 'Never'),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () => onEdit(garment),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Editar'),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final action in actions)
+                  OutlinedButton(
+                    onPressed: () => onTransition(
+                      garment,
+                      action.transition,
+                      requiresConfirmation: action.requiresConfirmation,
+                    ),
+                    child: Text(action.label),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detailLine(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Text('$label: $value'),
+    );
+  }
+}
+
+class _LifecycleAction {
+  const _LifecycleAction(
+    this.label,
+    this.transition, {
+    this.requiresConfirmation = false,
+  });
+
+  final String label;
+  final String transition;
+  final bool requiresConfirmation;
+}
+
+List<_LifecycleAction> _validLifecycleActions(String status) {
+  switch (status) {
+    case 'CLEAN_AVAILABLE':
+      return const [
+        _LifecycleAction('Enviar a ropa sucia', 'SEND_TO_LAUNDRY'),
+        _LifecycleAction('No disponible', 'MARK_UNAVAILABLE'),
+        _LifecycleAction('Enviar a reparación', 'SEND_TO_REPAIR'),
+        _LifecycleAction('Retirar', 'RETIRE'),
+        _LifecycleAction('Donar', 'DONATE', requiresConfirmation: true),
+        _LifecycleAction('Descartar', 'DISCARD', requiresConfirmation: true),
+      ];
+    case 'WORN_REUSABLE':
+      return const [
+        _LifecycleAction('Enviar a ropa sucia', 'SEND_TO_LAUNDRY'),
+        _LifecycleAction('Marcar limpia', 'MARK_CLEAN_AVAILABLE'),
+        _LifecycleAction('No disponible', 'MARK_UNAVAILABLE'),
+        _LifecycleAction('Enviar a reparación', 'SEND_TO_REPAIR'),
+        _LifecycleAction('Retirar', 'RETIRE'),
+      ];
+    case 'LAUNDRY_BIN':
+      return const [
+        _LifecycleAction('Iniciar lavado', 'START_WASHING'),
+        _LifecycleAction('Marcar limpia', 'MARK_CLEAN_AVAILABLE'),
+      ];
+    case 'WASHING':
+      return const [_LifecycleAction('Iniciar secado', 'START_DRYING')];
+    case 'DRYING':
+      return const [
+        _LifecycleAction('Lista para guardar', 'MARK_CLEAN_PENDING_STORAGE'),
+        _LifecycleAction('Marcar limpia', 'MARK_CLEAN_AVAILABLE'),
+      ];
+    case 'CLEAN_PENDING_STORAGE':
+      return const [_LifecycleAction('Marcar limpia', 'MARK_CLEAN_AVAILABLE')];
+    case 'UNAVAILABLE':
+      return const [
+        _LifecycleAction('Marcar limpia', 'MARK_CLEAN_AVAILABLE'),
+        _LifecycleAction('Enviar a reparación', 'SEND_TO_REPAIR'),
+        _LifecycleAction('Retirar', 'RETIRE'),
+      ];
+    case 'REPAIR':
+      return const [
+        _LifecycleAction('Volver de reparación', 'RETURN_FROM_REPAIR'),
+        _LifecycleAction('Retirar', 'RETIRE'),
+      ];
+    case 'RETIRED':
+      return const [
+        _LifecycleAction('Restaurar', 'RESTORE'),
+        _LifecycleAction('Donar', 'DONATE', requiresConfirmation: true),
+        _LifecycleAction('Descartar', 'DISCARD', requiresConfirmation: true),
+      ];
+    default:
+      return const [];
+  }
+}
+
 class _RejectedFeedbackDialog extends StatefulWidget {
   const _RejectedFeedbackDialog();
 
@@ -837,10 +1092,15 @@ class _RejectedFeedbackDialogState extends State<_RejectedFeedbackDialog> {
 }
 
 class _GarmentTile extends StatelessWidget {
-  const _GarmentTile({required this.garment, required this.fetchImage});
+  const _GarmentTile({
+    required this.garment,
+    required this.fetchImage,
+    required this.onTap,
+  });
 
   final Garment garment;
   final Future<List<int>> Function(String imageId) fetchImage;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -850,6 +1110,7 @@ class _GarmentTile extends StatelessWidget {
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
+      onTap: onTap,
       leading: garment.imageId == null
           ? const Icon(Icons.checkroom_outlined)
           : FutureBuilder<List<int>>(
@@ -910,9 +1171,10 @@ class _CreateGarmentInput {
 }
 
 class _CreateGarmentDialog extends StatefulWidget {
-  const _CreateGarmentDialog({this.initialAnalysis});
+  const _CreateGarmentDialog({this.initialAnalysis, this.initialGarment});
 
   final GarmentAnalysis? initialAnalysis;
+  final Garment? initialGarment;
 
   @override
   State<_CreateGarmentDialog> createState() => _CreateGarmentDialogState();
@@ -934,19 +1196,29 @@ class _CreateGarmentDialogState extends State<_CreateGarmentDialog> {
   void initState() {
     super.initState();
     final analysis = widget.initialAnalysis;
-    _category = analysis?.category ?? 'TOP';
-    _subcategory = analysis?.subcategory;
-    _pattern = analysis?.pattern;
-    _fit = analysis?.fit;
-    _estimatedMaterial = analysis?.estimatedMaterial;
+    final garment = widget.initialGarment;
+    _nameController.text = garment?.name ?? '';
+    _category = garment?.category ?? analysis?.category ?? 'TOP';
+    _status = garment?.status ?? 'CLEAN_AVAILABLE';
+    _subcategory = garment?.subcategory ?? analysis?.subcategory;
+    _pattern = garment?.pattern ?? analysis?.pattern;
+    _fit = garment?.fit ?? analysis?.fit;
+    _estimatedMaterial =
+        garment?.estimatedMaterial ?? analysis?.estimatedMaterial;
     _colorController = TextEditingController(
-      text: analysis?.primaryColor ?? 'black',
+      text: garment?.primaryColor ?? analysis?.primaryColor ?? 'black',
     );
     _secondaryColorsController = TextEditingController(
-      text: analysis?.secondaryColors.join(', ') ?? '',
+      text:
+          garment?.secondaryColors.join(', ') ??
+          analysis?.secondaryColors.join(', ') ??
+          '',
     );
     _formalityController = TextEditingController(
-      text: analysis?.formality?.toString() ?? '',
+      text:
+          garment?.formality?.toString() ??
+          analysis?.formality?.toString() ??
+          '',
     );
   }
 
@@ -963,7 +1235,11 @@ class _CreateGarmentDialogState extends State<_CreateGarmentDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(
-        widget.initialAnalysis == null ? 'Register garment' : 'Review garment',
+        widget.initialGarment != null
+            ? 'Edit garment'
+            : widget.initialAnalysis == null
+            ? 'Register garment'
+            : 'Review garment',
       ),
       content: SingleChildScrollView(
         child: Column(
@@ -1069,29 +1345,30 @@ class _CreateGarmentDialogState extends State<_CreateGarmentDialog> {
               decoration: const InputDecoration(labelText: 'Formalidad'),
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: _status,
-              decoration: const InputDecoration(labelText: 'Status'),
-              items: const [
-                DropdownMenuItem(
-                  value: 'CLEAN_AVAILABLE',
-                  child: Text('Clean available'),
-                ),
-                DropdownMenuItem(
-                  value: 'WORN_REUSABLE',
-                  child: Text('Worn reusable'),
-                ),
-                DropdownMenuItem(
-                  value: 'LAUNDRY_BIN',
-                  child: Text('Laundry bin'),
-                ),
-              ],
-              onChanged: (value) {
-                if (value != null) {
-                  setState(() => _status = value);
-                }
-              },
-            ),
+            if (widget.initialGarment == null)
+              DropdownButtonFormField<String>(
+                initialValue: _status,
+                decoration: const InputDecoration(labelText: 'Status'),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'CLEAN_AVAILABLE',
+                    child: Text('Clean available'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'WORN_REUSABLE',
+                    child: Text('Worn reusable'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'LAUNDRY_BIN',
+                    child: Text('Laundry bin'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _status = value);
+                  }
+                },
+              ),
           ],
         ),
       ),

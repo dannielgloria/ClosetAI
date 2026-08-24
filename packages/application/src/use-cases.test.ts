@@ -9,6 +9,8 @@ import {
   GarmentImage,
   GarmentMaterial,
   GarmentPattern,
+  GarmentStateTransition,
+  GarmentStateTransitionType,
   GarmentStatus,
   GarmentSubcategory,
   GarmentUsageEvent,
@@ -42,8 +44,11 @@ import {
   ConfirmOutfitUsageUseCase,
   CreateGarmentUseCase,
   GenerateBasicOutfitUseCase,
+  GetGarmentUseCase,
   SelectOutfitUseCase,
-  SubmitOutfitFeedbackUseCase
+  SubmitOutfitFeedbackUseCase,
+  TransitionGarmentStateUseCase,
+  UpdateGarmentUseCase
 } from "./use-cases.js";
 
 class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
@@ -143,6 +148,23 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
       ),
     findByUserId: async (userId: string) => [...this.garmentRows.values()].filter((garment) => garment.userId === userId),
     findByIds: async (ids: string[]) => ids.map((id) => this.garmentRows.get(id)).filter((row): row is Garment => Boolean(row)),
+    findById: async (id: string) => this.garmentRows.get(id) ?? null,
+    updateMetadata: async (
+      garmentId: string,
+      metadata: Pick<
+        Garment,
+        "category" | "primaryColor" | "secondaryColors" | "subcategory" | "pattern" | "fit" | "estimatedMaterial" | "formality" | "name"
+      >
+    ) => {
+      const garment = this.garmentRows.get(garmentId);
+      if (!garment) {
+        throw new Error("Garment not found.");
+      }
+
+      const updated = { ...garment, ...metadata, updatedAt: new Date("2026-08-24T00:00:00.000Z") };
+      this.garmentRows.set(garmentId, updated);
+      return updated;
+    },
     save: async (garment: Garment) => {
       this.garmentRows.set(garment.id, garment);
       return garment;
@@ -230,6 +252,25 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
     },
     findByOutfitId: async (outfitId: string) => [...this.outfitFeedbackRows.values()].filter((feedback) => feedback.outfitId === outfitId)
   };
+  garmentStateTransitions = {
+    create: async (input: {
+      garmentId: string;
+      userId: string;
+      fromStatus: GarmentStatus;
+      toStatus: GarmentStatus;
+      transition: GarmentStateTransitionType;
+    }) => {
+      const row: GarmentStateTransition = {
+        id: `garment-state-transition-${this.garmentStateTransitionRows.size + 1}`,
+        createdAt: new Date("2026-08-24T00:00:00.000Z"),
+        ...input
+      };
+      this.garmentStateTransitionRows.set(row.id, row);
+      return row;
+    },
+    findByGarmentId: async (garmentId: string) =>
+      [...this.garmentStateTransitionRows.values()].filter((transition) => transition.garmentId === garmentId)
+  };
 
   householdRows = new Map<string, Household>();
   userRows = new Map<string, ClosetUser>();
@@ -240,6 +281,7 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
   outfitRows = new Map<string, Outfit>();
   usageEventRows = new Map<string, GarmentUsageEvent>();
   outfitFeedbackRows = new Map<string, OutfitFeedback>();
+  garmentStateTransitionRows = new Map<string, GarmentStateTransition>();
 
   transaction<T>(work: (ports: ApplicationPorts) => Promise<T>): Promise<T> {
     return work(this);
@@ -780,6 +822,100 @@ describe("MVP use cases", () => {
 
     expect(result.strategy).toBe(OutfitRecommendationStrategy.DETERMINISTIC_FALLBACK);
     expect(result.recommendations[0]?.status).toBe(OutfitStatus.PRESENTED);
+  });
+
+  it("gets garment detail for the owner only", async () => {
+    const garment = await ports.garments.create({ userId: "user-1", category: GarmentCategory.TOP, primaryColor: "black", status: GarmentStatus.CLEAN_AVAILABLE });
+
+    await expect(new GetGarmentUseCase(ports).execute({ userId: "user-1", garmentId: garment.id })).resolves.toMatchObject({ id: garment.id });
+    await expect(new GetGarmentUseCase(ports).execute({ userId: "user-2", garmentId: garment.id })).rejects.toThrow("Garment access is forbidden.");
+    await expect(new GetGarmentUseCase(ports).execute({ userId: "user-1", garmentId: "missing" })).rejects.toThrow("Garment not found.");
+  });
+
+  it("updates editable garment metadata partially", async () => {
+    const garment = await ports.garments.create({
+      userId: "user-1",
+      category: GarmentCategory.TOP,
+      primaryColor: "cream",
+      status: GarmentStatus.CLEAN_AVAILABLE
+    });
+
+    const updated = await new UpdateGarmentUseCase(ports).execute({
+      userId: "user-1",
+      garmentId: garment.id,
+      name: "Playera crema oversized",
+      fit: GarmentFit.OVERSIZED,
+      formality: 2
+    });
+
+    expect(updated).toMatchObject({
+      name: "Playera crema oversized",
+      primaryColor: "CREAM",
+      fit: GarmentFit.OVERSIZED,
+      formality: 2,
+      status: GarmentStatus.CLEAN_AVAILABLE,
+      wearCount: 0
+    });
+  });
+
+  it("rejects invalid metadata and wrong-owner updates", async () => {
+    const garment = await ports.garments.create({ userId: "user-1", category: GarmentCategory.TOP, primaryColor: "cream", status: GarmentStatus.CLEAN_AVAILABLE });
+
+    await expect(
+      new UpdateGarmentUseCase(ports).execute({
+        userId: "user-1",
+        garmentId: garment.id,
+        formality: 6
+      })
+    ).rejects.toThrow("Garment formality must be between 1 and 5.");
+    await expect(
+      new UpdateGarmentUseCase(ports).execute({
+        userId: "user-2",
+        garmentId: garment.id,
+        name: "Nope"
+      })
+    ).rejects.toThrow("Garment update is forbidden.");
+  });
+
+  it("transitions garment state and persists history atomically", async () => {
+    const garment = await ports.garments.create({ userId: "user-1", category: GarmentCategory.TOP, primaryColor: "cream", status: GarmentStatus.CLEAN_AVAILABLE });
+
+    const result = await new TransitionGarmentStateUseCase(ports).execute({
+      userId: "user-1",
+      garmentId: garment.id,
+      transition: GarmentStateTransitionType.SEND_TO_LAUNDRY
+    });
+
+    expect(result.garment.status).toBe(GarmentStatus.LAUNDRY_BIN);
+    expect(result.stateTransition).toMatchObject({
+      garmentId: garment.id,
+      userId: "user-1",
+      fromStatus: GarmentStatus.CLEAN_AVAILABLE,
+      toStatus: GarmentStatus.LAUNDRY_BIN,
+      transition: GarmentStateTransitionType.SEND_TO_LAUNDRY
+    });
+    expect(await ports.garmentStateTransitions.findByGarmentId(garment.id)).toHaveLength(1);
+  });
+
+  it("rejects invalid or wrong-owner transitions without history", async () => {
+    const garment = await ports.garments.create({ userId: "user-1", category: GarmentCategory.TOP, primaryColor: "cream", status: GarmentStatus.CLEAN_AVAILABLE });
+
+    await expect(
+      new TransitionGarmentStateUseCase(ports).execute({
+        userId: "user-1",
+        garmentId: garment.id,
+        transition: GarmentStateTransitionType.START_WASHING
+      })
+    ).rejects.toThrow("Invalid garment state transition");
+    await expect(
+      new TransitionGarmentStateUseCase(ports).execute({
+        userId: "user-2",
+        garmentId: garment.id,
+        transition: GarmentStateTransitionType.SEND_TO_LAUNDRY
+      })
+    ).rejects.toThrow("Garment transition is forbidden.");
+    expect(await ports.garmentStateTransitions.findByGarmentId(garment.id)).toHaveLength(0);
+    expect((await ports.garments.findById(garment.id))?.status).toBe(GarmentStatus.CLEAN_AVAILABLE);
   });
 });
 

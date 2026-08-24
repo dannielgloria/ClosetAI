@@ -26,6 +26,22 @@ export enum GarmentStatus {
   DISCARDED = "DISCARDED"
 }
 
+export enum GarmentStateTransitionType {
+  MARK_WORN_REUSABLE = "MARK_WORN_REUSABLE",
+  SEND_TO_LAUNDRY = "SEND_TO_LAUNDRY",
+  START_WASHING = "START_WASHING",
+  START_DRYING = "START_DRYING",
+  MARK_CLEAN_PENDING_STORAGE = "MARK_CLEAN_PENDING_STORAGE",
+  MARK_CLEAN_AVAILABLE = "MARK_CLEAN_AVAILABLE",
+  MARK_UNAVAILABLE = "MARK_UNAVAILABLE",
+  SEND_TO_REPAIR = "SEND_TO_REPAIR",
+  RETURN_FROM_REPAIR = "RETURN_FROM_REPAIR",
+  RETIRE = "RETIRE",
+  RESTORE = "RESTORE",
+  DONATE = "DONATE",
+  DISCARD = "DISCARD"
+}
+
 export enum GarmentSubcategory {
   T_SHIRT = "T_SHIRT",
   SHIRT = "SHIRT",
@@ -131,6 +147,16 @@ export interface GarmentImage {
   objectKey: string;
   mimeType: string;
   size: number;
+  createdAt: Date;
+}
+
+export interface GarmentStateTransition {
+  id: EntityId;
+  garmentId: EntityId;
+  userId: EntityId;
+  fromStatus: GarmentStatus;
+  toStatus: GarmentStatus;
+  transition: GarmentStateTransitionType;
   createdAt: Date;
 }
 

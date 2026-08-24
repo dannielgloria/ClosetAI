@@ -7,6 +7,7 @@ import {
   GarmentFit,
   GarmentMaterial,
   GarmentPattern,
+  GarmentStateTransitionType,
   GarmentStatus,
   GarmentSubcategory,
   markGarmentWorn,
@@ -14,6 +15,7 @@ import {
   OutfitStatus,
   selectOutfit
 } from "@closet-ai/domain";
+import { transitionGarmentState } from "@closet-ai/domain";
 import { ApplicationPorts, UnitOfWorkPort } from "./ports.js";
 
 export class CreateHouseholdUseCase {
@@ -117,6 +119,94 @@ export class ListGarmentsUseCase {
   }
 }
 
+export class GetGarmentUseCase {
+  constructor(private readonly ports: ApplicationPorts) {}
+
+  async execute(input: { userId: EntityId; garmentId: EntityId }): Promise<Garment> {
+    const garment = await this.ports.garments.findById(input.garmentId);
+    if (!garment) {
+      throw new Error("Garment not found.");
+    }
+
+    if (garment.userId !== input.userId) {
+      throw new Error("Garment access is forbidden.");
+    }
+
+    return garment;
+  }
+}
+
+export class UpdateGarmentUseCase {
+  constructor(private readonly ports: ApplicationPorts) {}
+
+  async execute(input: {
+    userId: EntityId;
+    garmentId: EntityId;
+    category?: GarmentCategory;
+    primaryColor?: string;
+    secondaryColors?: string[];
+    subcategory?: GarmentSubcategory | null;
+    pattern?: GarmentPattern | null;
+    fit?: GarmentFit | null;
+    estimatedMaterial?: GarmentMaterial | null;
+    formality?: number | null;
+    name?: string | null;
+  }): Promise<Garment> {
+    const garment = await this.ports.garments.findById(input.garmentId);
+    if (!garment) {
+      throw new Error("Garment not found.");
+    }
+
+    if (garment.userId !== input.userId) {
+      throw new Error("Garment update is forbidden.");
+    }
+
+    const metadata = {
+      category: input.category ?? garment.category,
+      primaryColor: normalizeColor(input.primaryColor ?? garment.primaryColor),
+      secondaryColors: input.secondaryColors ? input.secondaryColors.map(normalizeColor) : garment.secondaryColors,
+      subcategory: input.subcategory === undefined ? garment.subcategory : input.subcategory,
+      pattern: input.pattern === undefined ? garment.pattern : input.pattern,
+      fit: input.fit === undefined ? garment.fit : input.fit,
+      estimatedMaterial: input.estimatedMaterial === undefined ? garment.estimatedMaterial : input.estimatedMaterial,
+      formality: input.formality === undefined ? garment.formality : input.formality,
+      name: input.name === undefined ? garment.name : normalizeOptionalText(input.name)
+    };
+    validateGarmentMetadata(metadata);
+
+    return this.ports.garments.updateMetadata(garment.id, metadata);
+  }
+}
+
+export class TransitionGarmentStateUseCase {
+  constructor(private readonly unitOfWork: UnitOfWorkPort) {}
+
+  async execute(input: { userId: EntityId; garmentId: EntityId; transition: GarmentStateTransitionType }) {
+    return this.unitOfWork.transaction(async (ports) => {
+      const garment = await ports.garments.findById(input.garmentId);
+      if (!garment) {
+        throw new Error("Garment not found.");
+      }
+
+      if (garment.userId !== input.userId) {
+        throw new Error("Garment transition is forbidden.");
+      }
+
+      const next = transitionGarmentState(garment, input.transition, new Date());
+      const saved = await ports.garments.save(next);
+      const stateTransition = await ports.garmentStateTransitions.create({
+        garmentId: garment.id,
+        userId: input.userId,
+        fromStatus: garment.status,
+        toStatus: saved.status,
+        transition: input.transition
+      });
+
+      return { garment: saved, stateTransition };
+    });
+  }
+}
+
 export class GenerateBasicOutfitUseCase {
   constructor(private readonly ports: ApplicationPorts) {}
 
@@ -185,6 +275,19 @@ export class ConfirmOutfitUsageUseCase {
       const wornOutfit = await ports.outfits.save(confirmOutfitUsage(outfit, now));
       const updatedGarments = garments.map((garment) => markGarmentWorn(garment, now));
       await Promise.all(updatedGarments.map((garment) => ports.garments.save(garment)));
+      await Promise.all(
+        garments
+          .filter((garment) => garment.status !== GarmentStatus.WORN_REUSABLE)
+          .map((garment) =>
+            ports.garmentStateTransitions.create({
+              garmentId: garment.id,
+              userId: input.userId,
+              fromStatus: garment.status,
+              toStatus: GarmentStatus.WORN_REUSABLE,
+              transition: GarmentStateTransitionType.MARK_WORN_REUSABLE
+            })
+          )
+      );
 
       const usageEvents = await ports.usageEvents.createManyIfAbsent(
         wornGarmentIds.map((garmentId) => ({
@@ -270,4 +373,13 @@ function normalizeColor(color: string): string {
   }
 
   return normalized;
+}
+
+function normalizeOptionalText(value: string | null): string | undefined {
+  if (value === null) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
 }

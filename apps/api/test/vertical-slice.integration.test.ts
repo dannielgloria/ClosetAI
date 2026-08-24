@@ -24,6 +24,7 @@ import {
   GarmentFit,
   GarmentMaterial,
   GarmentPattern,
+  GarmentStateTransitionType,
   GarmentSubcategory,
   InterpretedContext,
   WeatherContext
@@ -270,6 +271,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     await prisma.garmentUsageEvent.deleteMany();
     await prisma.outfitItem.deleteMany();
     await prisma.outfit.deleteMany();
+    await prisma.garmentStateTransition.deleteMany();
     await prisma.garmentImage.deleteMany();
     await prisma.garment.deleteMany();
     await prisma.authSession.deleteMany();
@@ -666,6 +668,136 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       .then((response) => response.body as GarmentResponse[]);
 
     expect(garmentsForA.map((garment) => garment.id)).not.toContain(userBGarment.id);
+  });
+
+  it("gets and edits garment metadata without allowing lifecycle fields in PATCH", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const garment = await createGarment(auth.accessToken, "TOP", "cream", "CLEAN_AVAILABLE", "Cream tee");
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/garments/${garment.id}`)
+      .set(authHeader(auth.accessToken))
+      .expect(200)
+      .expect((response) => {
+        expect(response.body).toMatchObject({ id: garment.id });
+      });
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/api/v1/garments/${garment.id}`)
+      .set(authHeader(auth.accessToken))
+      .send({ name: "Playera crema oversized", fit: "OVERSIZED", formality: 2, secondaryColors: ["black"] })
+      .expect(200)
+      .then((response) => response.body as GarmentResponse);
+
+    expect(updated).toMatchObject({
+      id: garment.id,
+      name: "Playera crema oversized",
+      primaryColor: "CREAM",
+      secondaryColors: ["BLACK"],
+      fit: "OVERSIZED",
+      formality: 2,
+      status: "CLEAN_AVAILABLE",
+      wearCount: 0
+    });
+
+    await request(app.getHttpServer())
+      .patch(`/api/v1/garments/${garment.id}`)
+      .set(authHeader(auth.accessToken))
+      .send({ status: "LAUNDRY_BIN" })
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch(`/api/v1/garments/${garment.id}`)
+      .set(authHeader(auth.accessToken))
+      .send({ wearCount: 99 })
+      .expect(400);
+  });
+
+  it("protects garment detail, edit, and transition ownership", async () => {
+    const { auth: userA } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const userB = await createUser(userA.accessToken, userA.user.householdId, "User B");
+    await seedCredentials(userB.id, "user-b@example.com", "correct-password");
+    const userBAuth = await login("user-b@example.com");
+    const garmentB = await createGarment(userBAuth.accessToken, "TOP", "red");
+
+    await request(app.getHttpServer()).get(`/api/v1/garments/${garmentB.id}`).set(authHeader(userA.accessToken)).expect(403);
+    await request(app.getHttpServer()).patch(`/api/v1/garments/${garmentB.id}`).set(authHeader(userA.accessToken)).send({ name: "Nope" }).expect(403);
+    await request(app.getHttpServer())
+      .post(`/api/v1/garments/${garmentB.id}/transitions`)
+      .set(authHeader(userA.accessToken))
+      .send({ transition: "SEND_TO_LAUNDRY" })
+      .expect(403);
+  });
+
+  it("applies garment lifecycle transitions, persists history, and updates outfit eligibility immediately", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const top = await createGarment(auth.accessToken, "TOP", "cream");
+    const alternateTop = await createGarment(auth.accessToken, "TOP", "black");
+    const bottom = await createGarment(auth.accessToken, "BOTTOM", "indigo");
+    const footwear = await createGarment(auth.accessToken, "FOOTWEAR", "white");
+
+    await request(app.getHttpServer()).get("/api/v1/garments/available").set(authHeader(auth.accessToken)).expect(200).expect((response) => {
+      expect((response.body as GarmentResponse[]).map((garment) => garment.id)).toContain(top.id);
+    });
+
+    const dirty = await request(app.getHttpServer())
+      .post(`/api/v1/garments/${top.id}/transitions`)
+      .set(authHeader(auth.accessToken))
+      .send({ transition: "SEND_TO_LAUNDRY" })
+      .expect(200)
+      .then((response) => response.body as GarmentResponse);
+    expect(dirty.status).toBe("LAUNDRY_BIN");
+    await expect(prisma.garmentStateTransition.count({ where: { garmentId: top.id } })).resolves.toBe(1);
+    await request(app.getHttpServer()).get("/api/v1/garments/available").set(authHeader(auth.accessToken)).expect(200).expect((response) => {
+      expect((response.body as GarmentResponse[]).map((garment) => garment.id)).not.toContain(top.id);
+    });
+
+    outfitStylistResult = [{ garmentIds: [top.id, bottom.id, footwear.id], score: 80, reason: "Should not be accepted because top is not eligible." }];
+    await request(app.getHttpServer())
+      .post("/api/v1/outfit-recommendations")
+      .set(authHeader(auth.accessToken))
+      .send({ context: { activities: [{ type: "CASUAL_DINNER", time: "20:00" }] } })
+      .expect(400);
+    expect(outfitStylistInput?.garments.map((garment) => garment.id)).not.toContain(top.id);
+    expect(outfitStylistInput?.garments.map((garment) => garment.id)).toContain(alternateTop.id);
+
+    const clean = await request(app.getHttpServer())
+      .post(`/api/v1/garments/${top.id}/transitions`)
+      .set(authHeader(auth.accessToken))
+      .send({ transition: "MARK_CLEAN_AVAILABLE" })
+      .expect(200)
+      .then((response) => response.body as GarmentResponse);
+    expect(clean.status).toBe("CLEAN_AVAILABLE");
+    await request(app.getHttpServer()).get("/api/v1/garments/available").set(authHeader(auth.accessToken)).expect(200).expect((response) => {
+      expect((response.body as GarmentResponse[]).map((garment) => garment.id)).toContain(top.id);
+    });
+    await expect(prisma.garmentStateTransition.findMany({ where: { garmentId: top.id }, orderBy: { createdAt: "asc" } })).resolves.toMatchObject([
+      { fromStatus: "CLEAN_AVAILABLE", toStatus: "LAUNDRY_BIN", transition: "SEND_TO_LAUNDRY" },
+      { fromStatus: "LAUNDRY_BIN", toStatus: "CLEAN_AVAILABLE", transition: "MARK_CLEAN_AVAILABLE" }
+    ]);
+  });
+
+  it("rejects invalid transitions and terminal donated/discarded restores", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const garment = await createGarment(auth.accessToken, "TOP", "cream");
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/garments/${garment.id}/transitions`)
+      .set(authHeader(auth.accessToken))
+      .send({ transition: "START_WASHING" })
+      .expect(400);
+
+    const donated = await request(app.getHttpServer())
+      .post(`/api/v1/garments/${garment.id}/transitions`)
+      .set(authHeader(auth.accessToken))
+      .send({ transition: GarmentStateTransitionType.DONATE })
+      .expect(200)
+      .then((response) => response.body as GarmentResponse);
+    expect(donated.status).toBe("DONATED");
+    await request(app.getHttpServer())
+      .post(`/api/v1/garments/${garment.id}/transitions`)
+      .set(authHeader(auth.accessToken))
+      .send({ transition: "RESTORE" })
+      .expect(400);
   });
 
   it("rejects outfit selection and usage confirmation across users", async () => {

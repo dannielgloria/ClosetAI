@@ -279,14 +279,155 @@ void main() {
     expect(repository.lastLocation?.city, 'Ciudad de Mexico');
     expect(find.text('18°C, rain 45%'), findsOneWidget);
   });
+
+  testWidgets(
+    'opens garment detail, edits metadata, and transitions lifecycle',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repository = FakeWardrobeRepository();
+
+      await tester.pumpWidget(
+        ClosetAiApp(
+          authController: AuthController(FakeAuthRepository()),
+          wardrobeRepository: repository,
+          contextRepository: FakeContextRepository(),
+          pickGarmentImage: (_) async => null,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Email'),
+        'user@example.com',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Password'),
+        'correct-password',
+      );
+      await tester.tap(find.text('Sign in'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Black tee'));
+      await tester.pumpAndSettle();
+      expect(find.text('Status: CLEAN_AVAILABLE'), findsOneWidget);
+      expect(find.text('Iniciar lavado'), findsNothing);
+
+      await tester.tap(find.text('Editar'));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit garment'), findsOneWidget);
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Name'),
+        'Black tee edited',
+      );
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(find.text('Black tee edited'), findsOneWidget);
+
+      await tester.tap(find.text('Black tee edited'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Enviar a ropa sucia'));
+      await tester.pumpAndSettle();
+      expect(repository.transitions, ['SEND_TO_LAUNDRY']);
+      expect(find.text('TOP / black / LAUNDRY_BIN'), findsOneWidget);
+    },
+  );
+
+  testWidgets('asks confirmation before irreversible garment action', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FakeWardrobeRepository();
+
+    await tester.pumpWidget(
+      ClosetAiApp(
+        authController: AuthController(FakeAuthRepository()),
+        wardrobeRepository: repository,
+        contextRepository: FakeContextRepository(),
+        pickGarmentImage: (_) async => null,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Email'),
+      'user@example.com',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Password'),
+      'correct-password',
+    );
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Black tee'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Donar'));
+    await tester.pumpAndSettle();
+    expect(find.text('Confirm action'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(repository.transitions, isEmpty);
+
+    await tester.tap(find.text('Donar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm'));
+    await tester.pumpAndSettle();
+    expect(repository.transitions, ['DONATE']);
+    await tester.tap(find.text('Black tee'));
+    await tester.pumpAndSettle();
+    expect(find.text('Restaurar'), findsNothing);
+  });
+
+  testWidgets('shows transition error state', (tester) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FakeWardrobeRepository(failTransition: true);
+
+    await tester.pumpWidget(
+      ClosetAiApp(
+        authController: AuthController(FakeAuthRepository()),
+        wardrobeRepository: repository,
+        contextRepository: FakeContextRepository(),
+        pickGarmentImage: (_) async => null,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Email'),
+      'user@example.com',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Password'),
+      'correct-password',
+    );
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Black tee'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Enviar a ropa sucia'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Transition unavailable'), findsOneWidget);
+  });
 }
 
 class FakeWardrobeRepository implements WardrobeRepository {
-  FakeWardrobeRepository({this.failFeedback = false});
+  FakeWardrobeRepository({
+    this.failFeedback = false,
+    this.failTransition = false,
+  });
 
   int createdGarments = 0;
   final bool failFeedback;
+  final bool failTransition;
   final List<String> feedbackDecisions = [];
+  final List<String> transitions = [];
   String? lastFeedbackReason;
   final List<Garment> _garments = [
     const Garment(
@@ -348,6 +489,87 @@ class FakeWardrobeRepository implements WardrobeRepository {
   @override
   Future<List<Garment>> listGarments() async {
     return _garments.toList(growable: false);
+  }
+
+  @override
+  Future<Garment> getGarment(String garmentId) async {
+    return _garments.firstWhere((garment) => garment.id == garmentId);
+  }
+
+  @override
+  Future<Garment> updateGarment({
+    required String garmentId,
+    String? category,
+    String? primaryColor,
+    List<String>? secondaryColors,
+    String? subcategory,
+    String? pattern,
+    String? fit,
+    String? estimatedMaterial,
+    int? formality,
+    String? name,
+  }) async {
+    final index = _garments.indexWhere((garment) => garment.id == garmentId);
+    final current = _garments[index];
+    final updated = Garment(
+      id: current.id,
+      userId: current.userId,
+      category: category ?? current.category,
+      primaryColor: primaryColor ?? current.primaryColor,
+      secondaryColors: secondaryColors ?? current.secondaryColors,
+      subcategory: subcategory ?? current.subcategory,
+      pattern: pattern ?? current.pattern,
+      fit: fit ?? current.fit,
+      estimatedMaterial: estimatedMaterial ?? current.estimatedMaterial,
+      formality: formality ?? current.formality,
+      status: current.status,
+      wearCount: current.wearCount,
+      lastWornAt: current.lastWornAt,
+      name: name ?? current.name,
+      imageId: current.imageId,
+    );
+    _garments[index] = updated;
+    return updated;
+  }
+
+  @override
+  Future<Garment> transitionGarment({
+    required String garmentId,
+    required String transition,
+  }) async {
+    if (failTransition) {
+      throw Exception('Transition unavailable');
+    }
+    transitions.add(transition);
+    final index = _garments.indexWhere((garment) => garment.id == garmentId);
+    final current = _garments[index];
+    final status = switch (transition) {
+      'SEND_TO_LAUNDRY' => 'LAUNDRY_BIN',
+      'MARK_CLEAN_AVAILABLE' => 'CLEAN_AVAILABLE',
+      'RETIRE' => 'RETIRED',
+      'DONATE' => 'DONATED',
+      'DISCARD' => 'DISCARDED',
+      _ => current.status,
+    };
+    final updated = Garment(
+      id: current.id,
+      userId: current.userId,
+      category: current.category,
+      primaryColor: current.primaryColor,
+      secondaryColors: current.secondaryColors,
+      subcategory: current.subcategory,
+      pattern: current.pattern,
+      fit: current.fit,
+      estimatedMaterial: current.estimatedMaterial,
+      formality: current.formality,
+      status: status,
+      wearCount: current.wearCount,
+      lastWornAt: current.lastWornAt,
+      name: current.name,
+      imageId: current.imageId,
+    );
+    _garments[index] = updated;
+    return updated;
   }
 
   @override

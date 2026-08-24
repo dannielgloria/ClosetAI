@@ -307,6 +307,9 @@ POST /api/v1/households/{householdId}/users
 POST /api/v1/garments
 GET  /api/v1/garments
 GET  /api/v1/garments/available
+GET  /api/v1/garments/{garmentId}
+PATCH /api/v1/garments/{garmentId}
+POST /api/v1/garments/{garmentId}/transitions
 POST /api/v1/garment-images
 POST /api/v1/garment-images/{imageId}/analyze
 GET  /api/v1/garment-images/{imageId}
@@ -353,6 +356,114 @@ Responses:
 401 missing, invalid, expired, or revoked access token
 403 image belongs to another user
 404 user or image not found
+```
+
+### Get Garment Detail
+
+```text
+GET /api/v1/garments/{garmentId}
+```
+
+Requires Bearer auth. Returns a garment only when it belongs to the
+authenticated user. The response includes `imageId` when a private image is
+linked.
+
+Responses:
+
+```text
+200 garment detail
+401 missing, invalid, expired, or revoked access token
+403 garment belongs to another user
+404 garment not found
+```
+
+### Update Garment Metadata
+
+```text
+PATCH /api/v1/garments/{garmentId}
+```
+
+Requires Bearer auth. Partially updates editable metadata only.
+
+Allowed fields:
+
+```text
+name
+category
+subcategory
+primaryColor
+secondaryColors
+pattern
+fit
+estimatedMaterial
+formality
+```
+
+Lifecycle fields such as `status`, `wearCount`, and `lastWornAt` are rejected.
+
+Example:
+
+```json
+{
+  "name": "Playera crema oversized",
+  "fit": "OVERSIZED",
+  "formality": 2
+}
+```
+
+Responses:
+
+```text
+200 garment updated
+400 invalid metadata or forbidden field
+401 missing, invalid, expired, or revoked access token
+403 garment belongs to another user
+404 garment not found
+```
+
+### Transition Garment State
+
+```text
+POST /api/v1/garments/{garmentId}/transitions
+```
+
+Requires Bearer auth. Applies an explicit lifecycle transition and records a
+`GarmentStateTransition` event in the same database transaction.
+
+Request:
+
+```json
+{
+  "transition": "SEND_TO_LAUNDRY"
+}
+```
+
+Allowed transitions:
+
+```text
+MARK_WORN_REUSABLE
+SEND_TO_LAUNDRY
+START_WASHING
+START_DRYING
+MARK_CLEAN_PENDING_STORAGE
+MARK_CLEAN_AVAILABLE
+MARK_UNAVAILABLE
+SEND_TO_REPAIR
+RETURN_FROM_REPAIR
+RETIRE
+RESTORE
+DONATE
+DISCARD
+```
+
+Responses:
+
+```text
+200 garment transitioned
+400 invalid transition
+401 missing, invalid, expired, or revoked access token
+403 garment belongs to another user
+404 garment not found
 ```
 
 ### Upload Garment Image

@@ -103,6 +103,10 @@ class AuthPorts implements ApplicationPorts, UnitOfWorkPort {
     findByUserId: async () => [],
     findAvailableByUserId: async () => [],
     findByIds: async () => [],
+    findById: async () => null,
+    updateMetadata: async () => {
+      throw new Error("not implemented");
+    },
     save: async () => {
       throw new Error("not implemented");
     }
@@ -134,6 +138,12 @@ class AuthPorts implements ApplicationPorts, UnitOfWorkPort {
       throw new Error("not implemented");
     },
     findByOutfitId: async (): Promise<OutfitFeedback[]> => []
+  };
+  garmentStateTransitions = {
+    create: async () => {
+      throw new Error("not implemented");
+    },
+    findByGarmentId: async () => []
   };
 
   usersById = new Map<string, ClosetUser>();

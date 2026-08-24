@@ -7,6 +7,8 @@ import {
   GarmentImage,
   GarmentMaterial,
   GarmentPattern,
+  GarmentStateTransition,
+  GarmentStateTransitionType,
   GarmentStatus,
   GarmentSubcategory,
   GarmentUsageEvent,
@@ -103,6 +105,15 @@ type PrismaOutfitFeedback = {
   userId: string;
   decision: string;
   reason: string | null;
+  createdAt: Date;
+};
+type PrismaGarmentStateTransition = {
+  id: string;
+  garmentId: string;
+  userId: string;
+  fromStatus: string;
+  toStatus: string;
+  transition: string;
   createdAt: Date;
 };
 
@@ -216,6 +227,18 @@ export function mapOutfitFeedback(row: PrismaOutfitFeedback): OutfitFeedback {
     userId: row.userId,
     decision: row.decision as OutfitFeedbackDecision,
     reason: row.reason,
+    createdAt: row.createdAt
+  };
+}
+
+export function mapGarmentStateTransition(row: PrismaGarmentStateTransition): GarmentStateTransition {
+  return {
+    id: row.id,
+    garmentId: row.garmentId,
+    userId: row.userId,
+    fromStatus: row.fromStatus as GarmentStatus,
+    toStatus: row.toStatus as GarmentStatus,
+    transition: row.transition as GarmentStateTransitionType,
     createdAt: row.createdAt
   };
 }

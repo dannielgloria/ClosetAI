@@ -82,6 +82,59 @@ class WardrobeController extends ChangeNotifier {
     return _repository.fetchGarmentImage(imageId);
   }
 
+  Future<Garment> getGarment(String garmentId) {
+    return _repository.getGarment(garmentId);
+  }
+
+  Future<void> updateGarment({
+    required String garmentId,
+    String? category,
+    String? primaryColor,
+    List<String>? secondaryColors,
+    String? subcategory,
+    String? pattern,
+    String? fit,
+    String? estimatedMaterial,
+    int? formality,
+    String? name,
+  }) async {
+    await _run(() async {
+      final updated = await _repository.updateGarment(
+        garmentId: garmentId,
+        category: category,
+        primaryColor: primaryColor?.trim(),
+        secondaryColors: secondaryColors,
+        subcategory: subcategory,
+        pattern: pattern,
+        fit: fit,
+        estimatedMaterial: estimatedMaterial,
+        formality: formality,
+        name: name,
+      );
+      garments = garments
+          .map((garment) => garment.id == updated.id ? updated : garment)
+          .toList(growable: false);
+    });
+  }
+
+  Future<void> transitionGarment({
+    required String garmentId,
+    required String transition,
+  }) async {
+    await _run(() async {
+      final updated = await _repository.transitionGarment(
+        garmentId: garmentId,
+        transition: transition,
+      );
+      garments = garments
+          .map((garment) => garment.id == updated.id ? updated : garment)
+          .toList(growable: false);
+      recommendations = const [];
+      recommendationStrategy = null;
+      weatherStatus = null;
+    });
+  }
+
   Future<void> updateLocation(UserLocation nextLocation) async {
     await _run(() async {
       location = await _repository.updateLocation(nextLocation);

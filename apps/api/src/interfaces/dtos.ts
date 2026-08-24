@@ -7,6 +7,7 @@ import {
   GarmentFit,
   GarmentMaterial,
   GarmentPattern,
+  GarmentStateTransitionType,
   GarmentStatus,
   GarmentSubcategory,
   OutfitFeedbackDecision
@@ -85,6 +86,63 @@ export class CreateGarmentDto {
   @IsOptional()
   @IsString()
   imageId?: string;
+}
+
+export class UpdateGarmentDto {
+  @ApiPropertyOptional({ enum: GarmentCategory })
+  @IsOptional()
+  @IsEnum(GarmentCategory)
+  category?: GarmentCategory;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  primaryColor?: string;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  secondaryColors?: string[];
+
+  @ApiPropertyOptional({ enum: GarmentSubcategory, nullable: true })
+  @IsOptional()
+  @IsEnum(GarmentSubcategory)
+  subcategory?: GarmentSubcategory | null;
+
+  @ApiPropertyOptional({ enum: GarmentPattern, nullable: true })
+  @IsOptional()
+  @IsEnum(GarmentPattern)
+  pattern?: GarmentPattern | null;
+
+  @ApiPropertyOptional({ enum: GarmentFit, nullable: true })
+  @IsOptional()
+  @IsEnum(GarmentFit)
+  fit?: GarmentFit | null;
+
+  @ApiPropertyOptional({ enum: GarmentMaterial, nullable: true })
+  @IsOptional()
+  @IsEnum(GarmentMaterial)
+  estimatedMaterial?: GarmentMaterial | null;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 5, nullable: true })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  formality?: number | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsString()
+  name?: string | null;
+}
+
+export class TransitionGarmentStateDto {
+  @ApiProperty({ enum: GarmentStateTransitionType })
+  @IsEnum(GarmentStateTransitionType)
+  transition!: GarmentStateTransitionType;
 }
 
 export class ConfirmOutfitUsageDto {

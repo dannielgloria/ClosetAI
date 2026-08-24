@@ -4,6 +4,8 @@ import {
   EntityId,
   Garment,
   GarmentImage,
+  GarmentStateTransition,
+  GarmentStateTransitionType,
   GarmentUsageEvent,
   Household,
   Outfit,
@@ -70,6 +72,14 @@ export interface GarmentRepositoryPort {
   findByUserId(userId: EntityId): Promise<Garment[]>;
   findAvailableByUserId(userId: EntityId): Promise<Garment[]>;
   findByIds(ids: EntityId[]): Promise<Garment[]>;
+  findById(id: EntityId): Promise<Garment | null>;
+  updateMetadata(
+    garmentId: EntityId,
+    metadata: Pick<
+      Garment,
+      "category" | "primaryColor" | "secondaryColors" | "subcategory" | "pattern" | "fit" | "estimatedMaterial" | "formality" | "name"
+    >
+  ): Promise<Garment>;
   save(garment: Garment): Promise<Garment>;
 }
 
@@ -106,6 +116,17 @@ export interface OutfitFeedbackRepositoryPort {
   findByOutfitId(outfitId: EntityId): Promise<OutfitFeedback[]>;
 }
 
+export interface GarmentStateTransitionRepositoryPort {
+  create(input: {
+    garmentId: EntityId;
+    userId: EntityId;
+    fromStatus: Garment["status"];
+    toStatus: Garment["status"];
+    transition: GarmentStateTransitionType;
+  }): Promise<GarmentStateTransition>;
+  findByGarmentId(garmentId: EntityId): Promise<GarmentStateTransition[]>;
+}
+
 export interface WeatherCachePort {
   get(key: string): Promise<WeatherContext | null>;
   set(key: string, value: WeatherContext, ttlSeconds: number): Promise<void>;
@@ -129,4 +150,5 @@ export interface ApplicationPorts {
   outfits: OutfitRepositoryPort;
   usageEvents: UsageEventRepositoryPort;
   outfitFeedback: OutfitFeedbackRepositoryPort;
+  garmentStateTransitions: GarmentStateTransitionRepositoryPort;
 }

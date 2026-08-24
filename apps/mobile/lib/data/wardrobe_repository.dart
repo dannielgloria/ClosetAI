@@ -7,6 +7,8 @@ import 'closet_api_client.dart';
 abstract interface class WardrobeRepository {
   Future<List<Garment>> listGarments();
 
+  Future<Garment> getGarment(String garmentId);
+
   Future<Garment> createGarment({
     required String category,
     required String primaryColor,
@@ -30,6 +32,24 @@ abstract interface class WardrobeRepository {
   Future<GarmentAnalysis> analyzeGarmentImage(String imageId);
 
   Future<List<int>> fetchGarmentImage(String imageId);
+
+  Future<Garment> updateGarment({
+    required String garmentId,
+    String? category,
+    String? primaryColor,
+    List<String>? secondaryColors,
+    String? subcategory,
+    String? pattern,
+    String? fit,
+    String? estimatedMaterial,
+    int? formality,
+    String? name,
+  });
+
+  Future<Garment> transitionGarment({
+    required String garmentId,
+    required String transition,
+  });
 
   Future<UserLocation> updateLocation(UserLocation location);
 
@@ -58,6 +78,13 @@ class ApiWardrobeRepository implements WardrobeRepository {
     final rows = await _apiClient.getList('/garments');
 
     return rows.map(Garment.fromJson).toList(growable: false);
+  }
+
+  @override
+  Future<Garment> getGarment(String garmentId) async {
+    final row = await _apiClient.getObject('/garments/$garmentId');
+
+    return Garment.fromJson(row);
   }
 
   @override
@@ -145,6 +172,57 @@ class ApiWardrobeRepository implements WardrobeRepository {
   @override
   Future<List<int>> fetchGarmentImage(String imageId) {
     return _apiClient.getBytes('/garment-images/$imageId');
+  }
+
+  @override
+  Future<Garment> updateGarment({
+    required String garmentId,
+    String? category,
+    String? primaryColor,
+    List<String>? secondaryColors,
+    String? subcategory,
+    String? pattern,
+    String? fit,
+    String? estimatedMaterial,
+    int? formality,
+    String? name,
+  }) async {
+    final body = <String, Object?>{};
+    void addOptional(String key, Object? value) {
+      if (value != null) {
+        body[key] = value;
+      }
+    }
+
+    addOptional('category', category);
+    addOptional('primaryColor', primaryColor);
+    addOptional('secondaryColors', secondaryColors);
+    addOptional('subcategory', subcategory);
+    addOptional('pattern', pattern);
+    addOptional('fit', fit);
+    addOptional('estimatedMaterial', estimatedMaterial);
+    addOptional('formality', formality);
+    addOptional('name', name);
+
+    final row = await _apiClient.patchObject(
+      '/garments/$garmentId',
+      body: body,
+    );
+
+    return Garment.fromJson(row);
+  }
+
+  @override
+  Future<Garment> transitionGarment({
+    required String garmentId,
+    required String transition,
+  }) async {
+    final row = await _apiClient.postObject(
+      '/garments/$garmentId/transitions',
+      body: {'transition': transition},
+    );
+
+    return Garment.fromJson(row);
   }
 
   @override
