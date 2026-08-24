@@ -6,6 +6,8 @@ import {
   GarmentUsageEvent,
   Household,
   Outfit,
+  OutfitFeedback,
+  OutfitFeedbackDecision,
   OutfitStatus,
   UserCredential
 } from "@closet-ai/domain";
@@ -78,6 +80,16 @@ export interface UsageEventRepositoryPort {
   findByOutfitId(outfitId: EntityId): Promise<GarmentUsageEvent[]>;
 }
 
+export interface OutfitFeedbackRepositoryPort {
+  create(input: {
+    outfitId: EntityId;
+    userId: EntityId;
+    decision: OutfitFeedbackDecision;
+    reason: string | null;
+  }): Promise<OutfitFeedback>;
+  findByOutfitId(outfitId: EntityId): Promise<OutfitFeedback[]>;
+}
+
 export interface UnitOfWorkPort {
   transaction<T>(work: (ports: ApplicationPorts) => Promise<T>): Promise<T>;
 }
@@ -90,4 +102,5 @@ export interface ApplicationPorts {
   garments: GarmentRepositoryPort;
   outfits: OutfitRepositoryPort;
   usageEvents: UsageEventRepositoryPort;
+  outfitFeedback: OutfitFeedbackRepositoryPort;
 }

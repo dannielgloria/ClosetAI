@@ -1,4 +1,4 @@
-import { BadRequestException, HttpException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, HttpException, NotFoundException } from "@nestjs/common";
 
 export function mapUseCaseError(error: unknown): never {
   if (error instanceof HttpException) {
@@ -9,6 +9,10 @@ export function mapUseCaseError(error: unknown): never {
 
   if (message.endsWith("not found.") || message === "Outfit not found.") {
     throw new NotFoundException(message);
+  }
+
+  if (message.endsWith("forbidden.")) {
+    throw new ForbiddenException(message);
   }
 
   throw new BadRequestException(message);

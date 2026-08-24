@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
-import { IsArray, IsEnum, IsObject, IsOptional, IsString, ValidateNested } from "class-validator";
-import { ActivityType, GarmentCategory, GarmentStatus } from "@closet-ai/domain";
+import { IsArray, IsEnum, IsObject, IsOptional, IsString, MaxLength, ValidateNested } from "class-validator";
+import { ActivityType, GarmentCategory, GarmentStatus, OutfitFeedbackDecision } from "@closet-ai/domain";
 
 export class CreateHouseholdDto {
   @ApiProperty()
@@ -50,6 +50,18 @@ export class ConfirmOutfitUsageDto {
   @IsOptional()
   @IsObject()
   context?: Record<string, unknown>;
+}
+
+export class SubmitOutfitFeedbackDto {
+  @ApiProperty({ enum: OutfitFeedbackDecision })
+  @IsEnum(OutfitFeedbackDecision)
+  decision!: OutfitFeedbackDecision;
+
+  @ApiPropertyOptional({ maxLength: 500, example: "Too formal" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }
 
 export class ActivityContextDto {
@@ -202,6 +214,23 @@ export class GarmentUsageEventResponseDto {
 
   @ApiProperty()
   context!: Record<string, unknown>;
+}
+
+export class OutfitFeedbackResponseDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  outfitId!: string;
+
+  @ApiProperty({ enum: OutfitFeedbackDecision })
+  decision!: OutfitFeedbackDecision;
+
+  @ApiProperty({ nullable: true })
+  reason!: string | null;
+
+  @ApiProperty()
+  createdAt!: Date;
 }
 
 export class ConfirmOutfitUsageResponseDto {

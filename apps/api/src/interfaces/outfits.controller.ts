@@ -1,8 +1,9 @@
-import { Body, Controller, HttpCode, Inject, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, HttpCode, Inject, Logger, Param, Post, UseGuards } from "@nestjs/common";
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -13,13 +14,22 @@ import {
   AuthenticatedUser,
   ConfirmOutfitUsageUseCase,
   GenerateOutfitRecommendationsUseCase,
-  SelectOutfitUseCase
+  SelectOutfitUseCase,
+  SubmitOutfitFeedbackUseCase
 } from "@closet-ai/application";
 import { CurrentUser } from "../auth/current-user.decorator.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import { ApplicationPortFactory } from "../prisma/application-port-factory.js";
 import { OUTFIT_STYLIST, OutfitStylistProvider } from "../outfit-stylist/outfit-stylist.provider.js";
-import { ConfirmOutfitUsageDto, ConfirmOutfitUsageResponseDto, GenerateOutfitRecommendationsDto, GenerateOutfitRecommendationsResponseDto, OutfitResponseDto } from "./dtos.js";
+import {
+  ConfirmOutfitUsageDto,
+  ConfirmOutfitUsageResponseDto,
+  GenerateOutfitRecommendationsDto,
+  GenerateOutfitRecommendationsResponseDto,
+  OutfitFeedbackResponseDto,
+  OutfitResponseDto,
+  SubmitOutfitFeedbackDto
+} from "./dtos.js";
 import { mapUseCaseError } from "./http-errors.js";
 
 @ApiTags("outfits")
@@ -27,6 +37,8 @@ import { mapUseCaseError } from "./http-errors.js";
 @UseGuards(JwtAuthGuard)
 @Controller()
 export class OutfitsController {
+  private readonly logger = new Logger(OutfitsController.name);
+
   constructor(
     private readonly portFactory: ApplicationPortFactory,
     @Inject(OUTFIT_STYLIST) private readonly outfitStylist: OutfitStylistProvider
@@ -84,6 +96,46 @@ export class OutfitsController {
         wornGarmentIds: body.wornGarmentIds,
         context: body.context
       });
+    } catch (error) {
+      mapUseCaseError(error);
+    }
+  }
+
+  @Post("outfits/:outfitId/feedback")
+  @ApiOperation({ summary: "Submit explicit feedback for an outfit recommendation." })
+  @ApiCreatedResponse({ type: OutfitFeedbackResponseDto })
+  @ApiNotFoundResponse({ description: "Outfit not found." })
+  @ApiBadRequestResponse({ description: "Invalid feedback decision or reason." })
+  @ApiForbiddenResponse({ description: "Outfit belongs to a different user." })
+  @ApiUnauthorizedResponse({ description: "Missing, invalid, or revoked access token." })
+  async submitFeedback(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Param("outfitId") outfitId: string,
+    @Body() body: SubmitOutfitFeedbackDto
+  ): Promise<OutfitFeedbackResponseDto> {
+    try {
+      const feedback = await new SubmitOutfitFeedbackUseCase(this.portFactory.create()).execute({
+        outfitId,
+        userId: currentUser.userId,
+        decision: body.decision,
+        reason: body.reason
+      });
+      this.logger.log(
+        JSON.stringify({
+          feedbackId: feedback.id,
+          outfitId: feedback.outfitId,
+          userId: currentUser.userId,
+          decision: feedback.decision
+        })
+      );
+
+      return {
+        id: feedback.id,
+        outfitId: feedback.outfitId,
+        decision: feedback.decision,
+        reason: feedback.reason,
+        createdAt: feedback.createdAt
+      };
     } catch (error) {
       mapUseCaseError(error);
     }

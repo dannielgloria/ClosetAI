@@ -6,6 +6,7 @@ import {
   GarmentCategory,
   GarmentStatus,
   markGarmentWorn,
+  OutfitFeedbackDecision,
   OutfitStatus,
   selectOutfit
 } from "@closet-ai/domain";
@@ -155,4 +156,49 @@ export class ConfirmOutfitUsageUseCase {
       return { outfit: wornOutfit, usageEvents };
     });
   }
+}
+
+export class SubmitOutfitFeedbackUseCase {
+  constructor(private readonly ports: ApplicationPorts) {}
+
+  async execute(input: { outfitId: EntityId; userId: EntityId; decision: OutfitFeedbackDecision; reason?: string | null }) {
+    const outfit = await this.ports.outfits.findById(input.outfitId);
+    if (!outfit) {
+      throw new Error("Outfit not found.");
+    }
+
+    if (outfit.userId !== input.userId) {
+      throw new Error("Outfit feedback is forbidden.");
+    }
+
+    if (!Object.values(OutfitFeedbackDecision).includes(input.decision)) {
+      throw new Error("Invalid outfit feedback decision.");
+    }
+
+    const reason = normalizeFeedbackReason(input.reason);
+
+    return this.ports.outfitFeedback.create({
+      outfitId: outfit.id,
+      userId: input.userId,
+      decision: input.decision,
+      reason
+    });
+  }
+}
+
+function normalizeFeedbackReason(reason: string | null | undefined): string | null {
+  if (reason === null || reason === undefined) {
+    return null;
+  }
+
+  const trimmed = reason.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  if (trimmed.length > 500) {
+    throw new Error("Feedback reason is too long.");
+  }
+
+  return trimmed;
 }

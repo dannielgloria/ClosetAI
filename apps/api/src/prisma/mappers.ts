@@ -7,6 +7,8 @@ import {
   GarmentUsageEvent,
   Household,
   Outfit,
+  OutfitFeedback,
+  OutfitFeedbackDecision,
   OutfitStatus,
   UserCredential
 } from "@closet-ai/domain";
@@ -64,6 +66,14 @@ type PrismaUsageEvent = {
   outfitId: string;
   wornAt: Date;
   context: unknown;
+};
+type PrismaOutfitFeedback = {
+  id: string;
+  outfitId: string;
+  userId: string;
+  decision: string;
+  reason: string | null;
+  createdAt: Date;
 };
 
 export function mapHousehold(row: PrismaHousehold): Household {
@@ -138,5 +148,16 @@ export function mapUsageEvent(row: PrismaUsageEvent): GarmentUsageEvent {
     outfitId: row.outfitId,
     wornAt: row.wornAt,
     context: typeof row.context === "object" && row.context !== null ? (row.context as Record<string, unknown>) : {}
+  };
+}
+
+export function mapOutfitFeedback(row: PrismaOutfitFeedback): OutfitFeedback {
+  return {
+    id: row.id,
+    outfitId: row.outfitId,
+    userId: row.userId,
+    decision: row.decision as OutfitFeedbackDecision,
+    reason: row.reason,
+    createdAt: row.createdAt
   };
 }

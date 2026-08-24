@@ -59,6 +59,14 @@ interface OutfitRecommendationsResponse {
   recommendations: OutfitResponse[];
 }
 
+interface OutfitFeedbackResponse {
+  id: string;
+  outfitId: string;
+  decision: "ACCEPTED" | "REJECTED";
+  reason: string | null;
+  createdAt: string;
+}
+
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 describe("MVP vertical slice with authentication and PostgreSQL", () => {
@@ -155,6 +163,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     process.env.AUTH_REFRESH_RATE_LIMIT_WINDOW_SECONDS = "60";
     contextInterpreterResult = { activities: [{ type: ActivityType.GYM, time: "17:00" }] };
     outfitStylistResult = [];
+    await prisma.outfitFeedback.deleteMany();
     await prisma.garmentUsageEvent.deleteMany();
     await prisma.outfitItem.deleteMany();
     await prisma.outfit.deleteMany();
@@ -628,6 +637,79 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       .expect(401);
   });
 
+  it("persists accepted outfit feedback without changing outfit state", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const outfit = await createDeterministicOutfit(auth.accessToken);
+
+    const feedback = await request(app.getHttpServer())
+      .post(`/api/v1/outfits/${outfit.id}/feedback`)
+      .set(authHeader(auth.accessToken))
+      .send({ decision: "ACCEPTED" })
+      .expect(201)
+      .then((response) => response.body as OutfitFeedbackResponse);
+
+    expect(feedback).toMatchObject({ outfitId: outfit.id, decision: "ACCEPTED", reason: null });
+    await expect(prisma.outfitFeedback.count({ where: { outfitId: outfit.id } })).resolves.toBe(1);
+    await expect(prisma.outfit.findUniqueOrThrow({ where: { id: outfit.id } })).resolves.toMatchObject({ status: outfit.status });
+  });
+
+  it("persists rejected outfit feedback with optional reason", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const outfit = await createDeterministicOutfit(auth.accessToken);
+
+    const feedback = await request(app.getHttpServer())
+      .post(`/api/v1/outfits/${outfit.id}/feedback`)
+      .set(authHeader(auth.accessToken))
+      .send({ decision: "REJECTED", reason: "Too formal" })
+      .expect(201)
+      .then((response) => response.body as OutfitFeedbackResponse);
+
+    expect(feedback).toMatchObject({ outfitId: outfit.id, decision: "REJECTED", reason: "Too formal" });
+    await expect(prisma.outfitFeedback.findUniqueOrThrow({ where: { id: feedback.id } })).resolves.toMatchObject({ reason: "Too formal" });
+  });
+
+  it("rejects invalid outfit feedback requests", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const outfit = await createDeterministicOutfit(auth.accessToken);
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/outfits/${outfit.id}/feedback`)
+      .send({ decision: "ACCEPTED" })
+      .expect(401);
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/outfits/${outfit.id}/feedback`)
+      .set(authHeader(auth.accessToken))
+      .send({ decision: "MAYBE" })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/outfits/${outfit.id}/feedback`)
+      .set(authHeader(auth.accessToken))
+      .send({ decision: "REJECTED", reason: "x".repeat(501) })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post("/api/v1/outfits/00000000-0000-0000-0000-000000000000/feedback")
+      .set(authHeader(auth.accessToken))
+      .send({ decision: "ACCEPTED" })
+      .expect(404);
+  });
+
+  it("rejects feedback for another user's outfit", async () => {
+    const { auth: userA } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const userB = await createUser(userA.accessToken, userA.user.householdId, "User B");
+    await seedCredentials(userB.id, "user-b@example.com", "correct-password");
+    const userBAuth = await login("user-b@example.com");
+    const outfitB = await createDeterministicOutfit(userBAuth.accessToken);
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/outfits/${outfitB.id}/feedback`)
+      .set(authHeader(userA.accessToken))
+      .send({ decision: "ACCEPTED" })
+      .expect(403);
+  });
+
   async function createHousehold(name: string, initialUserDisplayName: string): Promise<HouseholdResponse> {
     return request(app.getHttpServer())
       .post("/api/v1/households")
@@ -702,6 +784,19 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       .send({ category, primaryColor, status, name })
       .expect(201)
       .then((response) => response.body as GarmentResponse);
+  }
+
+  async function createDeterministicOutfit(accessToken: string): Promise<OutfitResponse> {
+    await createGarment(accessToken, "TOP", "black");
+    await createGarment(accessToken, "BOTTOM", "indigo");
+    await createGarment(accessToken, "FOOTWEAR", "white");
+
+    return request(app.getHttpServer())
+      .post("/api/v1/outfit-recommendations")
+      .set(authHeader(accessToken))
+      .send({})
+      .expect(201)
+      .then((response) => (response.body as OutfitRecommendationsResponse).recommendations[0]!);
   }
 
   async function expectWearCount(garmentId: string, wearCount: number): Promise<void> {

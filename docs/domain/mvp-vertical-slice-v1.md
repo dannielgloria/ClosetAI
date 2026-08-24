@@ -29,7 +29,18 @@ Create Usage Events
 - Selecting an outfit does not create usage events.
 - Confirming usage is idempotent.
 - Usage history is persisted as events, not only counters.
+- Outfit feedback is persisted as independent history and does not imply selection or usage.
 
 ## Outfit State Naming
 
 `AGENTS.md` mentions `PROPOSED`; the PRD uses `PRESENTED`. This slice uses `PRESENTED` in the database/API and treats it as the same conceptual stage.
+
+## Outfit Feedback
+
+`ACCEPTED` and `REJECTED` feedback are explicit user signals stored as
+append-only `OutfitFeedback` rows. Feedback does not mutate `Outfit.status`:
+`ACCEPTED` is not `SELECTED`, `SELECTED` is not `WORN`, and `REJECTED` does not
+delete or invalidate the recommendation.
+
+For MVP v1, duplicate submissions are not silently collapsed because there is
+no idempotency-key convention for this endpoint yet.

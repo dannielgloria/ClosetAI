@@ -399,22 +399,66 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
               Text('Strategy: ${_controller.recommendationStrategy}'),
               const SizedBox(height: 8),
               for (final recommendation in _controller.recommendations)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.style_outlined),
-                  title: Text('LOOK ${recommendation.score}/100'),
-                  subtitle: Text(
-                    '${recommendation.items.map((item) => _garmentLabel(item.garmentId)).join('\n')}\n\n${recommendation.explanation}',
-                  ),
-                  trailing: TextButton(
-                    onPressed: recommendation.status == 'SELECTED'
-                        ? null
-                        : () => _controller.selectOutfit(recommendation.id),
-                    child: Text(
-                      recommendation.status == 'SELECTED'
-                          ? 'Selected'
-                          : 'Usar este outfit',
-                    ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.style_outlined),
+                        title: Text('LOOK ${recommendation.score}/100'),
+                        subtitle: Text(
+                          '${recommendation.items.map((item) => _garmentLabel(item.garmentId)).join('\n')}\n\n${recommendation.explanation}',
+                        ),
+                      ),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          TextButton.icon(
+                            onPressed: recommendation.status == 'SELECTED'
+                                ? null
+                                : () => _controller.selectOutfit(
+                                    recommendation.id,
+                                  ),
+                            icon: const Icon(Icons.checkroom),
+                            label: Text(
+                              recommendation.status == 'SELECTED'
+                                  ? 'Selected'
+                                  : 'Usar este outfit',
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: _controller.isLoading
+                                ? null
+                                : () => _submitAcceptedFeedback(
+                                    recommendation.id,
+                                  ),
+                            icon: const Icon(Icons.thumb_up_outlined),
+                            label: const Text('Me gusta'),
+                          ),
+                          TextButton.icon(
+                            onPressed: _controller.isLoading
+                                ? null
+                                : () => _showRejectedFeedbackDialog(
+                                    recommendation.id,
+                                  ),
+                            icon: const Icon(Icons.thumb_down_outlined),
+                            label: const Text('No me gusta'),
+                          ),
+                        ],
+                      ),
+                      if (_controller.feedbackByOutfitId[recommendation.id] !=
+                          null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            'Feedback: ${_controller.feedbackByOutfitId[recommendation.id]}',
+                            style: textTheme.bodySmall,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
             ],
@@ -435,6 +479,30 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
   Future<void> _generateOutfitRecommendations() {
     return _controller.generateOutfitRecommendations(
       context: _contextController.interpretedContext,
+    );
+  }
+
+  Future<void> _submitAcceptedFeedback(String outfitId) {
+    return _controller.submitOutfitFeedback(
+      outfitId: outfitId,
+      decision: 'ACCEPTED',
+    );
+  }
+
+  Future<void> _showRejectedFeedbackDialog(String outfitId) async {
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => const _RejectedFeedbackDialog(),
+    );
+
+    if (reason == null) {
+      return;
+    }
+
+    await _controller.submitOutfitFeedback(
+      outfitId: outfitId,
+      decision: 'REJECTED',
+      reason: reason,
     );
   }
 
@@ -471,6 +539,46 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
       primaryColor: result.primaryColor,
       status: result.status,
       name: result.name,
+    );
+  }
+}
+
+class _RejectedFeedbackDialog extends StatefulWidget {
+  const _RejectedFeedbackDialog();
+
+  @override
+  State<_RejectedFeedbackDialog> createState() =>
+      _RejectedFeedbackDialogState();
+}
+
+class _RejectedFeedbackDialogState extends State<_RejectedFeedbackDialog> {
+  final _reasonController = TextEditingController();
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('¿Por qué?'),
+      content: TextField(
+        controller: _reasonController,
+        maxLength: 500,
+        decoration: const InputDecoration(labelText: 'Razón opcional'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_reasonController.text),
+          child: const Text('Enviar'),
+        ),
+      ],
     );
   }
 }

@@ -42,6 +42,11 @@ enum OutfitStatus {
   CANCELLED
 }
 
+enum OutfitFeedbackDecision {
+  ACCEPTED
+  REJECTED
+}
+
 model Household {
   id        String   @id @default(uuid()) @db.Uuid
   name      String
@@ -52,16 +57,17 @@ model Household {
 }
 
 model User {
-  id          String    @id @default(uuid()) @db.Uuid
-  householdId String    @map("household_id") @db.Uuid
-  displayName String    @map("display_name")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  garments    Garment[]
-  outfits     Outfit[]
-  usageEvents GarmentUsageEvent[]
-  credential  UserCredential?
-  authSessions AuthSession[]
+  id             String              @id @default(uuid()) @db.Uuid
+  householdId    String              @map("household_id") @db.Uuid
+  displayName    String              @map("display_name")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  household      Household           @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  garments       Garment[]
+  outfits        Outfit[]
+  usageEvents    GarmentUsageEvent[]
+  credential     UserCredential?
+  authSessions   AuthSession[]
+  outfitFeedback OutfitFeedback[]
 
   @@index([householdId])
   @@map("users")
@@ -130,9 +136,25 @@ model Outfit {
   user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   items       OutfitItem[]
   usageEvents GarmentUsageEvent[]
+  feedback    OutfitFeedback[]
 
   @@index([userId, status])
   @@map("outfits")
+}
+
+model OutfitFeedback {
+  id        String                 @id @default(uuid()) @db.Uuid
+  outfitId  String                 @map("outfit_id") @db.Uuid
+  userId    String                 @map("user_id") @db.Uuid
+  decision  OutfitFeedbackDecision
+  reason    String?
+  createdAt DateTime               @default(now()) @map("created_at")
+  outfit    Outfit                 @relation(fields: [outfitId], references: [id], onDelete: Cascade)
+  user      User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([outfitId])
+  @@index([userId, createdAt])
+  @@map("outfit_feedback")
 }
 
 model OutfitItem {

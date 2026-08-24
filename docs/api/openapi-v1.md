@@ -246,6 +246,7 @@ GET  /api/v1/garments/available
 POST /api/v1/outfit-recommendations
 POST /api/v1/outfits/{outfitId}/select
 POST /api/v1/outfits/{outfitId}/confirm-usage
+POST /api/v1/outfits/{outfitId}/feedback
 ```
 
 ### Generate Outfit Recommendations
@@ -326,4 +327,58 @@ Responses:
 201 recommendations persisted
 400 invalid context, insufficient garments, or invalid AI recommendation
 401 missing, invalid, expired, or revoked access token
+```
+
+### Submit Outfit Feedback
+
+```text
+POST /api/v1/outfits/{outfitId}/feedback
+```
+
+Requires Bearer auth. Records explicit feedback for an outfit as an independent
+history event. Feedback does not select an outfit, mark it as worn, delete it,
+or change the outfit state.
+
+Request:
+
+```json
+{
+  "decision": "REJECTED",
+  "reason": "Too formal"
+}
+```
+
+`decision` must be one of:
+
+```text
+ACCEPTED
+REJECTED
+```
+
+`reason` is optional and may contain at most 500 characters.
+
+Response:
+
+```json
+{
+  "id": "uuid",
+  "outfitId": "uuid",
+  "decision": "REJECTED",
+  "reason": "Too formal",
+  "createdAt": "2026-08-24T00:00:00.000Z"
+}
+```
+
+For MVP v1, feedback is append-only history: the same user may submit multiple
+feedback events for the same outfit over time. No idempotency key is introduced
+for this endpoint.
+
+Responses:
+
+```text
+201 feedback persisted
+400 invalid decision or reason
+401 missing, invalid, expired, or revoked access token
+403 outfit belongs to another user
+404 outfit not found
 ```

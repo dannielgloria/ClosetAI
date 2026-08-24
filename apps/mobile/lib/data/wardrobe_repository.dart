@@ -18,6 +18,12 @@ abstract interface class WardrobeRepository {
   });
 
   Future<OutfitRecommendation> selectOutfit(String outfitId);
+
+  Future<OutfitFeedback> submitOutfitFeedback({
+    required String outfitId,
+    required String decision,
+    String? reason,
+  });
 }
 
 class ApiWardrobeRepository implements WardrobeRepository {
@@ -69,5 +75,22 @@ class ApiWardrobeRepository implements WardrobeRepository {
     final row = await _apiClient.postObject('/outfits/$outfitId/select');
 
     return OutfitRecommendation.fromJson(row);
+  }
+
+  @override
+  Future<OutfitFeedback> submitOutfitFeedback({
+    required String outfitId,
+    required String decision,
+    String? reason,
+  }) async {
+    final row = await _apiClient.postObject(
+      '/outfits/$outfitId/feedback',
+      body: {
+        'decision': decision,
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      },
+    );
+
+    return OutfitFeedback.fromJson(row);
   }
 }

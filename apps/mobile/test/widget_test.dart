@@ -86,11 +86,85 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Selected'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Me gusta'),
+      500,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Me gusta'));
+    await tester.pumpAndSettle();
+
+    expect(repository.feedbackDecisions, ['ACCEPTED']);
+    expect(find.text('Feedback: ACCEPTED'), findsOneWidget);
+
+    await tester.tap(find.text('No me gusta'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Razón opcional'),
+      'Too formal',
+    );
+    await tester.tap(find.text('Enviar'));
+    await tester.pumpAndSettle();
+
+    expect(repository.feedbackDecisions, ['ACCEPTED', 'REJECTED']);
+    expect(repository.lastFeedbackReason, 'Too formal');
+    expect(find.text('Feedback: REJECTED'), findsOneWidget);
+  });
+
+  testWidgets('shows a basic error when outfit feedback fails', (tester) async {
+    tester.view.physicalSize = const Size(800, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FakeWardrobeRepository(failFeedback: true);
+
+    await tester.pumpWidget(
+      ClosetAiApp(
+        authController: AuthController(FakeAuthRepository()),
+        wardrobeRepository: repository,
+        contextRepository: FakeContextRepository(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Email'),
+      'user@example.com',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Password'),
+      'correct-password',
+    );
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Interpretar'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Generar outfits'),
+      500,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Generar outfits'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Me gusta'),
+      500,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Me gusta'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Feedback unavailable'), findsOneWidget);
   });
 }
 
 class FakeWardrobeRepository implements WardrobeRepository {
+  FakeWardrobeRepository({this.failFeedback = false});
+
   int createdGarments = 0;
+  final bool failFeedback;
+  final List<String> feedbackDecisions = [];
+  String? lastFeedbackReason;
   final List<Garment> _garments = [
     const Garment(
       id: 'garment-1',
@@ -165,6 +239,25 @@ class FakeWardrobeRepository implements WardrobeRepository {
       ],
       explanation: 'Ready for dinner.',
       score: 91,
+    );
+  }
+
+  @override
+  Future<OutfitFeedback> submitOutfitFeedback({
+    required String outfitId,
+    required String decision,
+    String? reason,
+  }) async {
+    if (failFeedback) {
+      throw Exception('Feedback unavailable');
+    }
+    feedbackDecisions.add(decision);
+    lastFeedbackReason = reason;
+    return OutfitFeedback(
+      id: 'feedback-${feedbackDecisions.length}',
+      outfitId: outfitId,
+      decision: decision,
+      reason: reason,
     );
   }
 }

@@ -5,6 +5,7 @@ import {
   AuthSessionRepositoryPort,
   GarmentRepositoryPort,
   HouseholdRepositoryPort,
+  OutfitFeedbackRepositoryPort,
   OutfitRepositoryPort,
   UnitOfWorkPort,
   UsageEventRepositoryPort,
@@ -13,7 +14,16 @@ import {
 } from "@closet-ai/application";
 import { GarmentStatus, OutfitStatus } from "@closet-ai/domain";
 import { PrismaService } from "./prisma.service.js";
-import { mapAuthSession, mapGarment, mapHousehold, mapOutfit, mapUsageEvent, mapUser, mapUserCredential } from "./mappers.js";
+import {
+  mapAuthSession,
+  mapGarment,
+  mapHousehold,
+  mapOutfit,
+  mapOutfitFeedback,
+  mapUsageEvent,
+  mapUser,
+  mapUserCredential
+} from "./mappers.js";
 
 type PrismaTransactionClient = Prisma.TransactionClient;
 type DbClient = PrismaClient | PrismaTransactionClient;
@@ -30,7 +40,8 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
       authSessions: this.createAuthSessionRepository(db),
       garments: this.createGarmentRepository(db),
       outfits: this.createOutfitRepository(db),
-      usageEvents: this.createUsageEventRepository(db)
+      usageEvents: this.createUsageEventRepository(db),
+      outfitFeedback: this.createOutfitFeedbackRepository(db)
     };
   }
 
@@ -249,6 +260,24 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
       },
       findByOutfitId: async (outfitId) =>
         (await db.garmentUsageEvent.findMany({ where: { outfitId }, orderBy: { wornAt: "asc" } })).map(mapUsageEvent)
+    };
+  }
+
+  private createOutfitFeedbackRepository(db: DbClient): OutfitFeedbackRepositoryPort {
+    return {
+      create: async (input) =>
+        mapOutfitFeedback(
+          await db.outfitFeedback.create({
+            data: {
+              outfitId: input.outfitId,
+              userId: input.userId,
+              decision: input.decision,
+              reason: input.reason
+            }
+          })
+        ),
+      findByOutfitId: async (outfitId) =>
+        (await db.outfitFeedback.findMany({ where: { outfitId }, orderBy: { createdAt: "asc" } })).map(mapOutfitFeedback)
     };
   }
 }

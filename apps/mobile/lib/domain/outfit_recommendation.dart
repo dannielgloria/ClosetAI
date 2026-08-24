@@ -73,3 +73,26 @@ class OutfitRecommendationsResult {
   final String strategy;
   final List<OutfitRecommendation> recommendations;
 }
+
+class OutfitFeedback {
+  const OutfitFeedback({
+    required this.id,
+    required this.outfitId,
+    required this.decision,
+    required this.reason,
+  });
+
+  factory OutfitFeedback.fromJson(Map<String, Object?> json) {
+    return OutfitFeedback(
+      id: json['id']! as String,
+      outfitId: json['outfitId']! as String,
+      decision: json['decision']! as String,
+      reason: json['reason'] as String?,
+    );
+  }
+
+  final String id;
+  final String outfitId;
+  final String decision;
+  final String? reason;
+}

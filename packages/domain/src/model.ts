@@ -35,6 +35,11 @@ export enum OutfitStatus {
   CANCELLED = "CANCELLED"
 }
 
+export enum OutfitFeedbackDecision {
+  ACCEPTED = "ACCEPTED",
+  REJECTED = "REJECTED"
+}
+
 export interface Household {
   id: EntityId;
   name: string;
@@ -86,6 +91,15 @@ export interface GarmentUsageEvent {
   outfitId: EntityId;
   wornAt: Date;
   context: Record<string, unknown>;
+}
+
+export interface OutfitFeedback {
+  id: EntityId;
+  outfitId: EntityId;
+  userId: EntityId;
+  decision: OutfitFeedbackDecision;
+  reason: string | null;
+  createdAt: Date;
 }
 
 export interface UserCredential {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { AuthSession, ClosetUser, UserCredential } from "@closet-ai/domain";
+import { AuthSession, ClosetUser, OutfitFeedback, UserCredential } from "@closet-ai/domain";
 import { ApplicationPorts, UnitOfWorkPort } from "./ports.js";
 import {
   AccessTokenIssuerPort,
@@ -116,6 +116,12 @@ class AuthPorts implements ApplicationPorts, UnitOfWorkPort {
   usageEvents = {
     createManyIfAbsent: async () => [],
     findByOutfitId: async () => []
+  };
+  outfitFeedback = {
+    create: async () => {
+      throw new Error("not implemented");
+    },
+    findByOutfitId: async (): Promise<OutfitFeedback[]> => []
   };
 
   usersById = new Map<string, ClosetUser>();

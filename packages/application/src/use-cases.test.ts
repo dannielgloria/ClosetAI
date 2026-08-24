@@ -9,6 +9,8 @@ import {
   GarmentUsageEvent,
   Household,
   Outfit,
+  OutfitFeedback,
+  OutfitFeedbackDecision,
   OutfitStatus,
   UserCredential
 } from "@closet-ai/domain";
@@ -25,7 +27,8 @@ import {
   ConfirmOutfitUsageUseCase,
   CreateGarmentUseCase,
   GenerateBasicOutfitUseCase,
-  SelectOutfitUseCase
+  SelectOutfitUseCase,
+  SubmitOutfitFeedbackUseCase
 } from "./use-cases.js";
 
 class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
@@ -154,6 +157,18 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
     },
     findByOutfitId: async (outfitId: string) => [...this.usageEventRows.values()].filter((event) => event.outfitId === outfitId)
   };
+  outfitFeedback = {
+    create: async (input: { outfitId: string; userId: string; decision: OutfitFeedbackDecision; reason: string | null }) => {
+      const row: OutfitFeedback = {
+        id: `feedback-${this.outfitFeedbackRows.size + 1}`,
+        createdAt: new Date("2026-08-23T00:00:00.000Z"),
+        ...input
+      };
+      this.outfitFeedbackRows.set(row.id, row);
+      return row;
+    },
+    findByOutfitId: async (outfitId: string) => [...this.outfitFeedbackRows.values()].filter((feedback) => feedback.outfitId === outfitId)
+  };
 
   householdRows = new Map<string, Household>();
   userRows = new Map<string, ClosetUser>();
@@ -162,6 +177,7 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
   garmentRows = new Map<string, Garment>();
   outfitRows = new Map<string, Outfit>();
   usageEventRows = new Map<string, GarmentUsageEvent>();
+  outfitFeedbackRows = new Map<string, OutfitFeedback>();
 
   transaction<T>(work: (ports: ApplicationPorts) => Promise<T>): Promise<T> {
     return work(this);
@@ -236,6 +252,94 @@ describe("MVP use cases", () => {
     expect(ports.usageEventRows.size).toBe(1);
     expect(ports.garmentRows.get(top.id)?.wearCount).toBe(1);
     expect(ports.garmentRows.get(bottom.id)?.wearCount).toBe(0);
+  });
+
+  it("persists accepted outfit feedback without changing outfit state", async () => {
+    const outfit = await ports.outfits.create({ userId: "user-1", garmentIds: [], explanation: "Basic", score: 100, status: OutfitStatus.PRESENTED });
+
+    const feedback = await new SubmitOutfitFeedbackUseCase(ports).execute({
+      outfitId: outfit.id,
+      userId: "user-1",
+      decision: OutfitFeedbackDecision.ACCEPTED
+    });
+
+    expect(feedback).toMatchObject({
+      outfitId: outfit.id,
+      userId: "user-1",
+      decision: OutfitFeedbackDecision.ACCEPTED,
+      reason: null
+    });
+    expect(ports.outfitRows.get(outfit.id)?.status).toBe(OutfitStatus.PRESENTED);
+  });
+
+  it("persists rejected outfit feedback with trimmed reason", async () => {
+    const outfit = await ports.outfits.create({ userId: "user-1", garmentIds: [], explanation: "Basic", score: 100 });
+
+    const feedback = await new SubmitOutfitFeedbackUseCase(ports).execute({
+      outfitId: outfit.id,
+      userId: "user-1",
+      decision: OutfitFeedbackDecision.REJECTED,
+      reason: "  Too formal  "
+    });
+
+    expect(feedback.reason).toBe("Too formal");
+  });
+
+  it("rejects oversized feedback reason", async () => {
+    const outfit = await ports.outfits.create({ userId: "user-1", garmentIds: [], explanation: "Basic", score: 100 });
+
+    await expect(
+      new SubmitOutfitFeedbackUseCase(ports).execute({
+        outfitId: outfit.id,
+        userId: "user-1",
+        decision: OutfitFeedbackDecision.REJECTED,
+        reason: "x".repeat(501)
+      })
+    ).rejects.toThrow("Feedback reason is too long.");
+  });
+
+  it("rejects invalid feedback decision", async () => {
+    const outfit = await ports.outfits.create({ userId: "user-1", garmentIds: [], explanation: "Basic", score: 100 });
+
+    await expect(
+      new SubmitOutfitFeedbackUseCase(ports).execute({
+        outfitId: outfit.id,
+        userId: "user-1",
+        decision: "MAYBE" as OutfitFeedbackDecision
+      })
+    ).rejects.toThrow("Invalid outfit feedback decision.");
+  });
+
+  it("rejects feedback for a missing outfit", async () => {
+    await expect(
+      new SubmitOutfitFeedbackUseCase(ports).execute({
+        outfitId: "missing",
+        userId: "user-1",
+        decision: OutfitFeedbackDecision.ACCEPTED
+      })
+    ).rejects.toThrow("Outfit not found.");
+  });
+
+  it("rejects feedback for another user's outfit", async () => {
+    const outfit = await ports.outfits.create({ userId: "user-2", garmentIds: [], explanation: "Basic", score: 100 });
+
+    await expect(
+      new SubmitOutfitFeedbackUseCase(ports).execute({
+        outfitId: outfit.id,
+        userId: "user-1",
+        decision: OutfitFeedbackDecision.ACCEPTED
+      })
+    ).rejects.toThrow("Outfit feedback is forbidden.");
+  });
+
+  it("allows multiple feedback history events for the same outfit", async () => {
+    const outfit = await ports.outfits.create({ userId: "user-1", garmentIds: [], explanation: "Basic", score: 100 });
+    const useCase = new SubmitOutfitFeedbackUseCase(ports);
+
+    await useCase.execute({ outfitId: outfit.id, userId: "user-1", decision: OutfitFeedbackDecision.ACCEPTED });
+    await useCase.execute({ outfitId: outfit.id, userId: "user-1", decision: OutfitFeedbackDecision.REJECTED, reason: "Changed my mind" });
+
+    expect(await ports.outfitFeedback.findByOutfitId(outfit.id)).toHaveLength(2);
   });
 
   it("sends only eligible current-user garments to the AI stylist", async () => {

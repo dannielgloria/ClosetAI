@@ -15,6 +15,7 @@ class WardrobeController extends ChangeNotifier {
   List<Garment> garments = const [];
   String? recommendationStrategy;
   List<OutfitRecommendation> recommendations = const [];
+  Map<String, String> feedbackByOutfitId = const {};
 
   Future<void> loadGarments() async {
     await _run(() async {
@@ -60,6 +61,24 @@ class WardrobeController extends ChangeNotifier {
                 recommendation.id == selected.id ? selected : recommendation,
           )
           .toList(growable: false);
+    });
+  }
+
+  Future<void> submitOutfitFeedback({
+    required String outfitId,
+    required String decision,
+    String? reason,
+  }) async {
+    await _run(() async {
+      final feedback = await _repository.submitOutfitFeedback(
+        outfitId: outfitId,
+        decision: decision,
+        reason: reason,
+      );
+      feedbackByOutfitId = {
+        ...feedbackByOutfitId,
+        feedback.outfitId: feedback.decision,
+      };
     });
   }
 
