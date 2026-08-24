@@ -3,9 +3,14 @@ import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module.js";
+import { getRuntimeConfig, validateProductionConfig } from "./config/app-config.js";
+import { configureHttpHardening } from "./config/http-hardening.js";
 
 async function bootstrap() {
+  validateProductionConfig();
+  const runtimeConfig = getRuntimeConfig();
   const app = await NestFactory.create(AppModule);
+  configureHttpHardening(app);
   app.setGlobalPrefix("api/v1");
   app.useGlobalPipes(
     new ValidationPipe({
@@ -24,7 +29,7 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup("api/docs", app, document);
 
-  await app.listen(process.env.PORT ? Number(process.env.PORT) : 3000);
+  await app.listen(runtimeConfig.port);
 }
 
 await bootstrap();

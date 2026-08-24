@@ -1,0 +1,65 @@
+const INSECURE_PRODUCTION_VALUES = new Set(["", "secret123", "changeme", "development-secret", "dev-only-change-me"]);
+
+export interface RuntimeConfig {
+  environment: "local" | "production" | "test";
+  port: number;
+  corsAllowedOrigins: string[];
+  jsonPayloadLimit: string;
+}
+
+export function getRuntimeConfig(): RuntimeConfig {
+  return {
+    environment: getEnvironment(),
+    port: process.env.PORT ? Number(process.env.PORT) : 3000,
+    corsAllowedOrigins: parseCsv(process.env.CORS_ALLOWED_ORIGINS),
+    jsonPayloadLimit: process.env.JSON_PAYLOAD_LIMIT ?? "1mb"
+  };
+}
+
+export function validateProductionConfig(): void {
+  if (getEnvironment() !== "production") {
+    return;
+  }
+
+  const required = ["DATABASE_URL", "DATABASE_PASSWORD", "JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "SETUP_SECRET"];
+  const missingOrInsecure = required.filter((name) => {
+    const value = process.env[name]?.trim() ?? "";
+    return INSECURE_PRODUCTION_VALUES.has(value);
+  });
+
+  if (missingOrInsecure.length > 0) {
+    throw new Error(`Missing or insecure production configuration: ${missingOrInsecure.join(", ")}`);
+  }
+
+  const corsOrigins = parseCsv(process.env.CORS_ALLOWED_ORIGINS);
+  if (corsOrigins.length === 0 || corsOrigins.includes("*")) {
+    throw new Error("Production requires explicit CORS_ALLOWED_ORIGINS and cannot use '*'.");
+  }
+}
+
+export function applySecurityHeaders(response: { setHeader(name: string, value: string): void }): void {
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("Referrer-Policy", "no-referrer");
+  response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  response.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+}
+
+function getEnvironment(): RuntimeConfig["environment"] {
+  if (process.env.NODE_ENV === "production") {
+    return "production";
+  }
+
+  if (process.env.NODE_ENV === "test") {
+    return "test";
+  }
+
+  return "local";
+}
+
+function parseCsv(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}

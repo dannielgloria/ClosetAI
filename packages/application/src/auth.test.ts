@@ -3,6 +3,7 @@ import { AuthSession, ClosetUser, UserCredential } from "@closet-ai/domain";
 import { ApplicationPorts, UnitOfWorkPort } from "./ports.js";
 import {
   AccessTokenIssuerPort,
+  BootstrapUserCredentialUseCase,
   CreateUserCredentialUseCase,
   GetAuthenticatedUserUseCase,
   LoginUseCase,
@@ -61,7 +62,8 @@ class AuthPorts implements ApplicationPorts, UnitOfWorkPort {
       return credential;
     },
     findByEmail: async (email: string) => [...this.credentialsById.values()].find((row) => row.email === email) ?? null,
-    findByUserId: async (userId: string) => [...this.credentialsById.values()].find((row) => row.userId === userId) ?? null
+    findByUserId: async (userId: string) => [...this.credentialsById.values()].find((row) => row.userId === userId) ?? null,
+    count: async () => this.credentialsById.size
   };
   authSessions = {
     create: async (input: {
@@ -83,6 +85,8 @@ class AuthPorts implements ApplicationPorts, UnitOfWorkPort {
       return session;
     },
     findById: async (id: string) => this.sessionsById.get(id) ?? null,
+    findExpired: async (now: Date) => [...this.sessionsById.values()].filter((session) => session.expiresAt.getTime() <= now.getTime()),
+    findRevoked: async () => [...this.sessionsById.values()].filter((session) => Boolean(session.revokedAt)),
     save: async (session: AuthSession) => {
       this.sessionsById.set(session.id, session);
       return session;
@@ -150,6 +154,32 @@ describe("Authentication use cases", () => {
 
     expect(credential.email).toBe("dann@example.com");
     expect(credential.passwordHash).toBe("hash:correct-password");
+  });
+
+  it("rejects passwords shorter than the minimum policy", async () => {
+    await expect(
+      new CreateUserCredentialUseCase(ports, hasher).execute({
+        userId: "user-1",
+        email: "dann@example.com",
+        password: "short"
+      })
+    ).rejects.toThrow("Password must be at least 10 characters.");
+  });
+
+  it("allows private bootstrap only before credentials exist", async () => {
+    await new BootstrapUserCredentialUseCase(ports, hasher).execute({
+      userId: "user-1",
+      email: "dann@example.com",
+      password: "correct-password"
+    });
+
+    await expect(
+      new BootstrapUserCredentialUseCase(ports, hasher).execute({
+        userId: "user-1",
+        email: "second@example.com",
+        password: "correct-password"
+      })
+    ).rejects.toThrow("Credential bootstrap is disabled.");
   });
 
   it("logs in with the correct password", async () => {

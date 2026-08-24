@@ -6,13 +6,15 @@ const DEFAULT_REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export interface ApiAuthConfig extends AuthConfig {
   jwtAccessSecret: string;
   jwtAccessTtl: string;
+  setupSecret?: string;
 }
 
 export function getAuthConfig(): ApiAuthConfig {
   return {
     jwtAccessSecret: process.env.JWT_ACCESS_SECRET ?? "dev-only-change-me",
     jwtAccessTtl: process.env.JWT_ACCESS_TTL ?? DEFAULT_ACCESS_TTL,
-    refreshTokenTtlMs: parseDurationMs(process.env.JWT_REFRESH_TTL, DEFAULT_REFRESH_TTL_MS)
+    refreshTokenTtlMs: parseDurationMs(process.env.JWT_REFRESH_TTL, DEFAULT_REFRESH_TTL_MS),
+    setupSecret: process.env.SETUP_SECRET
   };
 }
 

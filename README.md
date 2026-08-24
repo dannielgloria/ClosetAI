@@ -19,6 +19,7 @@ This bootstrap implements the first MVP vertical slice without AI:
 ```sh
 pnpm install
 pnpm prisma:generate
+cp .env.example .env
 docker compose up -d postgres redis
 pnpm --filter @closet-ai/api start:dev
 ```

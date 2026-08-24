@@ -19,8 +19,10 @@ Implement custom NestJS authentication with:
 - Refresh rotation on every successful refresh.
 - Refresh-token reuse detection by revoking the session when a refresh token for an otherwise active session does not match the currently stored hash.
 - PostgreSQL-backed `UserCredential` and `AuthSession` persistence.
+- Bootstrap credentials protected by `SETUP_SECRET` and disabled after the first credential exists.
+- Auth-specific rate limits backed by Redis for bootstrap, login, and refresh.
 
-For MVP bootstrap, credentials are attached to an existing user through a private bootstrap endpoint. This is not public registration and should be replaced or protected by an administrative mechanism before any non-private deployment.
+For MVP bootstrap, credentials are attached to an existing user through a private bootstrap endpoint. This is not public registration. It is available only while no credentials exist and requires `SETUP_SECRET`.
 
 The initial NestJS adapter uses `@node-rs/argon2` configured with `Algorithm.Argon2id`. This keeps the application layer coupled only to `PasswordHasherPort`.
 
@@ -40,5 +42,5 @@ The initial NestJS adapter uses `@node-rs/argon2` configured with `Algorithm.Arg
 
 ## Risks
 
-- The bootstrap credentials endpoint is acceptable only for the private MVP setup phase.
+- The bootstrap credentials endpoint is acceptable only for the private MVP setup phase and becomes unusable after the first credential exists.
 - The simple per-session reuse model revokes a single session, not all sessions for a user. This matches the MVP scope and can evolve to token families or logout-all later.

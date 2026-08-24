@@ -13,7 +13,7 @@ export class BootstrapCredentialsDto {
 
   @ApiProperty()
   @IsString()
-  @MinLength(8)
+  @MinLength(10)
   password!: string;
 }
 

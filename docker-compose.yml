@@ -3,7 +3,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: closet_ai
-      POSTGRES_PASSWORD: closet_ai_dev_password
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD is required}
       POSTGRES_DB: closet_ai
     ports:
       - "5432:5432"

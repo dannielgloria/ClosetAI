@@ -3,11 +3,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
+import { Algorithm, hash } from "@node-rs/argon2";
 import { PrismaClient } from "@prisma/client";
 import request from "supertest";
 import { GenericContainer, StartedTestContainer, Wait } from "testcontainers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module.js";
+import { configureHttpHardening } from "../src/config/http-hardening.js";
 
 interface HouseholdResponse {
   household: { id: string; name: string };
@@ -52,6 +54,7 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 describe("MVP vertical slice with authentication and PostgreSQL", () => {
   let container: StartedTestContainer;
+  let redisContainer: StartedTestContainer;
   let app: INestApplication;
   let prisma: PrismaClient;
 
@@ -66,15 +69,27 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       .withWaitStrategy(Wait.forLogMessage(/database system is ready to accept connections/))
       .withStartupTimeout(120_000)
       .start();
+    redisContainer = await new GenericContainer("redis:7-alpine")
+      .withExposedPorts(6379)
+      .withWaitStrategy(Wait.forLogMessage(/Ready to accept connections/))
+      .withStartupTimeout(120_000)
+      .start();
 
     const databaseUrl = `postgresql://closet_ai:closet_ai_test_password@${container.getHost()}:${container.getMappedPort(
       5432
     )}/closet_ai_test?schema=public`;
+    const redisUrl = `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`;
 
     process.env.DATABASE_URL = databaseUrl;
+    process.env.REDIS_URL = redisUrl;
     process.env.JWT_ACCESS_SECRET = "test-access-secret";
+    process.env.JWT_REFRESH_SECRET = "test-refresh-secret";
     process.env.JWT_ACCESS_TTL = "15m";
     process.env.JWT_REFRESH_TTL = "30d";
+    process.env.SETUP_SECRET = "test-setup-secret";
+    process.env.AUTH_BOOTSTRAP_RATE_LIMIT_MAX = "100";
+    process.env.AUTH_LOGIN_RATE_LIMIT_MAX = "100";
+    process.env.AUTH_REFRESH_RATE_LIMIT_MAX = "100";
     execFileSync("pnpm", ["prisma", "migrate", "deploy"], {
       cwd: rootDir,
       env: { ...process.env, DATABASE_URL: databaseUrl },
@@ -88,6 +103,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    configureHttpHardening(app);
     app.setGlobalPrefix("api/v1");
     app.useGlobalPipes(
       new ValidationPipe({
@@ -100,6 +116,11 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
   }, 120_000);
 
   beforeEach(async () => {
+    process.env.AUTH_BOOTSTRAP_RATE_LIMIT_MAX = "100";
+    process.env.AUTH_LOGIN_RATE_LIMIT_MAX = "100";
+    process.env.AUTH_REFRESH_RATE_LIMIT_MAX = "100";
+    process.env.AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS = "60";
+    process.env.AUTH_REFRESH_RATE_LIMIT_WINDOW_SECONDS = "60";
     await prisma.garmentUsageEvent.deleteMany();
     await prisma.outfitItem.deleteMany();
     await prisma.outfit.deleteMany();
@@ -113,7 +134,99 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
   afterAll(async () => {
     await app?.close();
     await prisma?.$disconnect();
+    await redisContainer?.stop();
     await container?.stop();
+  });
+
+  it("protects bootstrap with setup secret, password policy, and one-time setup", async () => {
+    const { user } = await createHousehold("Home", "User A");
+
+    const missingSecret = await request(app.getHttpServer())
+      .post("/api/v1/auth/bootstrap-credentials")
+      .send({ userId: user.id, email: "user-a@example.com", password: "correct-password" })
+      .expect(403);
+    expect(missingSecret.headers["x-content-type-options"]).toBe("nosniff");
+
+    await request(app.getHttpServer())
+      .post("/api/v1/auth/bootstrap-credentials")
+      .set("x-setup-secret", "wrong-secret")
+      .send({ userId: user.id, email: "user-a@example.com", password: "correct-password" })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post("/api/v1/auth/bootstrap-credentials")
+      .set("x-setup-secret", "test-setup-secret")
+      .send({ userId: user.id, email: "user-a@example.com", password: "short" })
+      .expect(400);
+
+    await bootstrapCredentials(user.id, "user-a@example.com", "correct-password");
+
+    const userB = await createUser(user.householdId, "User B");
+    await request(app.getHttpServer())
+      .post("/api/v1/auth/bootstrap-credentials")
+      .set("x-setup-secret", "test-setup-secret")
+      .send({ userId: userB.id, email: "user-b@example.com", password: "correct-password" })
+      .expect(403);
+  });
+
+  it("returns a generic response for wrong password and nonexistent email", async () => {
+    const { user } = await createHousehold("Home", "User A");
+    await bootstrapCredentials(user.id, "user-a@example.com", "correct-password");
+
+    const wrongPassword = await request(app.getHttpServer())
+      .post("/api/v1/auth/login")
+      .send({ email: "user-a@example.com", password: "wrong-password" })
+      .expect(401);
+
+    const nonexistentEmail = await request(app.getHttpServer())
+      .post("/api/v1/auth/login")
+      .send({ email: "missing@example.com", password: "wrong-password" })
+      .expect(401);
+
+    expect(wrongPassword.body.message).toBe("Invalid credentials.");
+    expect(nonexistentEmail.body.message).toBe("Invalid credentials.");
+  });
+
+  it("rate limits login and refresh without blocking the whole API", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    process.env.AUTH_LOGIN_RATE_LIMIT_MAX = "2";
+    process.env.AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS = "60";
+    process.env.AUTH_REFRESH_RATE_LIMIT_MAX = "1";
+    process.env.AUTH_REFRESH_RATE_LIMIT_WINDOW_SECONDS = "60";
+
+    const loginIp = "203.0.113.10";
+    await request(app.getHttpServer()).post("/api/v1/auth/login").set("x-forwarded-for", loginIp).send({ email: "missing@example.com", password: "wrong-password" }).expect(401);
+    await request(app.getHttpServer()).post("/api/v1/auth/login").set("x-forwarded-for", loginIp).send({ email: "missing@example.com", password: "wrong-password" }).expect(401);
+    await request(app.getHttpServer()).post("/api/v1/auth/login").set("x-forwarded-for", loginIp).send({ email: "missing@example.com", password: "wrong-password" }).expect(429);
+
+    const refreshIp = "203.0.113.11";
+    await request(app.getHttpServer()).post("/api/v1/auth/refresh").set("x-forwarded-for", refreshIp).send({ refreshToken: "not-a-token" }).expect(401);
+    await request(app.getHttpServer()).post("/api/v1/auth/refresh").set("x-forwarded-for", refreshIp).send({ refreshToken: "not-a-token" }).expect(429);
+
+    await request(app.getHttpServer()).get("/api/v1/garments").set(authHeader(auth.accessToken)).expect(200);
+    process.env.AUTH_LOGIN_RATE_LIMIT_MAX = "100";
+    process.env.AUTH_REFRESH_RATE_LIMIT_MAX = "100";
+  });
+
+  it("rate limits bootstrap attempts", async () => {
+    const { user } = await createHousehold("Home", "User A");
+    process.env.AUTH_BOOTSTRAP_RATE_LIMIT_MAX = "1";
+    process.env.AUTH_BOOTSTRAP_RATE_LIMIT_WINDOW_SECONDS = "60";
+    const bootstrapIp = "203.0.113.12";
+
+    await request(app.getHttpServer())
+      .post("/api/v1/auth/bootstrap-credentials")
+      .set("x-forwarded-for", bootstrapIp)
+      .set("x-setup-secret", "wrong-secret")
+      .send({ userId: user.id, email: "user-a@example.com", password: "correct-password" })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post("/api/v1/auth/bootstrap-credentials")
+      .set("x-forwarded-for", bootstrapIp)
+      .set("x-setup-secret", "wrong-secret")
+      .send({ userId: user.id, email: "user-a@example.com", password: "correct-password" })
+      .expect(429);
   });
 
   it("authenticates, refreshes, rotates refresh tokens, and revokes logout sessions", async () => {
@@ -217,7 +330,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
   it("does not expose USER_B garments to USER_A", async () => {
     const { auth: userA } = await createAuthenticatedUser("User A", "user-a@example.com");
     const userB = await createUser(userA.user.householdId, "User B");
-    await bootstrapCredentials(userB.id, "user-b@example.com", "correct-password");
+    await seedCredentials(userB.id, "user-b@example.com", "correct-password");
     const userBAuth = await login("user-b@example.com");
 
     await createGarment(userA.accessToken, "TOP", "black");
@@ -235,7 +348,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
   it("rejects outfit selection and usage confirmation across users", async () => {
     const { auth: userA } = await createAuthenticatedUser("User A", "user-a@example.com");
     const userB = await createUser(userA.user.householdId, "User B");
-    await bootstrapCredentials(userB.id, "user-b@example.com", "correct-password");
+    await seedCredentials(userB.id, "user-b@example.com", "correct-password");
     const userBAuth = await login("user-b@example.com");
 
     await createGarment(userBAuth.accessToken, "TOP", "black");
@@ -325,7 +438,11 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
   }
 
   async function bootstrapCredentials(userId: string, email: string, password: string) {
-    return request(app.getHttpServer()).post("/api/v1/auth/bootstrap-credentials").send({ userId, email, password }).expect(201);
+    return request(app.getHttpServer())
+      .post("/api/v1/auth/bootstrap-credentials")
+      .set("x-setup-secret", "test-setup-secret")
+      .send({ userId, email, password })
+      .expect(201);
   }
 
   async function login(email: string): Promise<AuthResponse> {
@@ -337,6 +454,16 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
         expect(response.body).not.toHaveProperty("session");
         return response.body as AuthResponse;
       });
+  }
+
+  async function seedCredentials(userId: string, email: string, password: string): Promise<void> {
+    await prisma.userCredential.create({
+      data: {
+        userId,
+        email,
+        passwordHash: await hash(password, { algorithm: Algorithm.Argon2id })
+      }
+    });
   }
 
   async function createGarment(

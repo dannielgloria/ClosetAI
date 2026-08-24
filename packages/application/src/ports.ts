@@ -28,6 +28,7 @@ export interface UserCredentialRepositoryPort {
   create(input: { userId: EntityId; email: string; passwordHash: string }): Promise<UserCredential>;
   findByEmail(email: string): Promise<UserCredential | null>;
   findByUserId(userId: EntityId): Promise<UserCredential | null>;
+  count(): Promise<number>;
 }
 
 export interface AuthSessionRepositoryPort {
@@ -40,6 +41,8 @@ export interface AuthSessionRepositoryPort {
     userAgent?: string;
   }): Promise<AuthSession>;
   findById(id: EntityId): Promise<AuthSession | null>;
+  findExpired(now: Date): Promise<AuthSession[]>;
+  findRevoked(): Promise<AuthSession[]>;
   save(session: AuthSession): Promise<AuthSession>;
 }
 

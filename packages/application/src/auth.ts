@@ -57,6 +57,8 @@ export interface LogoutInput {
   sessionId: EntityId;
 }
 
+const MIN_PASSWORD_LENGTH = 10;
+
 export class CreateUserCredentialUseCase {
   constructor(
     private readonly ports: ApplicationPorts,
@@ -70,6 +72,7 @@ export class CreateUserCredentialUseCase {
     }
 
     const email = normalizeEmail(input.email);
+    assertPasswordPolicy(input.password);
     const existing = await this.ports.userCredentials.findByUserId(input.userId);
     if (existing) {
       throw new Error("User already has credentials.");
@@ -77,6 +80,22 @@ export class CreateUserCredentialUseCase {
 
     const passwordHash = await this.passwordHasher.hashPassword(input.password);
     return this.ports.userCredentials.create({ userId: input.userId, email, passwordHash });
+  }
+}
+
+export class BootstrapUserCredentialUseCase {
+  constructor(
+    private readonly ports: ApplicationPorts,
+    private readonly passwordHasher: PasswordHasherPort
+  ) {}
+
+  async execute(input: CreateCredentialInput): Promise<UserCredential> {
+    const credentialCount = await this.ports.userCredentials.count();
+    if (credentialCount > 0) {
+      throw new Error("Credential bootstrap is disabled.");
+    }
+
+    return new CreateUserCredentialUseCase(this.ports, this.passwordHasher).execute(input);
   }
 }
 
@@ -234,6 +253,21 @@ export class GetAuthenticatedUserUseCase {
   }
 }
 
+export class ListAuthSessionMaintenanceCandidatesUseCase {
+  constructor(private readonly ports: ApplicationPorts) {}
+
+  async execute(input: { now: Date } = { now: new Date() }): Promise<{ expired: AuthSession[]; revoked: AuthSession[] }> {
+    const [expired, revoked] = await Promise.all([this.ports.authSessions.findExpired(input.now), this.ports.authSessions.findRevoked()]);
+    return { expired, revoked };
+  }
+}
+
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+export function assertPasswordPolicy(password: string): void {
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    throw new Error("Password must be at least 10 characters.");
+  }
 }

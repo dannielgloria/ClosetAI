@@ -27,7 +27,14 @@ POST /api/v1/auth/bootstrap-credentials
 ```
 
 Private MVP bootstrap endpoint for attaching credentials to an existing user
-created through the Household/User flow. This is not public registration.
+created through the Household/User flow. This is not public registration. It
+requires `x-setup-secret` and is disabled after the first credential exists.
+
+Headers:
+
+```text
+x-setup-secret: <private setup secret>
+```
 
 Request:
 
@@ -44,7 +51,9 @@ Responses:
 ```text
 201 credentials created
 400 invalid input or duplicate credentials
+403 missing or invalid setup secret, or bootstrap disabled
 404 user not found
+429 too many bootstrap attempts
 ```
 
 ### Login
@@ -68,7 +77,8 @@ Responses:
 
 ```text
 200 accessToken, refreshToken, user
-401 invalid email or password
+401 invalid credentials
+429 too many login attempts
 ```
 
 ### Refresh
@@ -90,6 +100,7 @@ Responses:
 ```text
 200 new accessToken, new refreshToken, user
 401 invalid, expired, revoked, or reused refresh token
+429 too many refresh attempts
 ```
 
 Successful refresh rotates the refresh token. Reusing an older refresh token
@@ -108,6 +119,7 @@ Responses:
 ```text
 200 session revoked
 401 missing, invalid, expired, or revoked access token
+429 not applied
 ```
 
 ### Me
@@ -123,6 +135,7 @@ Responses:
 ```text
 200 authenticated user
 401 missing, invalid, expired, or revoked access token
+429 not applied
 ```
 
 ## MVP Wardrobe Endpoints

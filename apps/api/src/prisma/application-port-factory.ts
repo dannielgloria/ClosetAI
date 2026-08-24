@@ -91,7 +91,8 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
       findByUserId: async (userId) => {
         const row = await db.userCredential.findUnique({ where: { userId } });
         return row ? mapUserCredential(row) : null;
-      }
+      },
+      count: async () => db.userCredential.count()
     };
   }
 
@@ -114,6 +115,20 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
         const row = await db.authSession.findUnique({ where: { id } });
         return row ? mapAuthSession(row) : null;
       },
+      findExpired: async (now) =>
+        (
+          await db.authSession.findMany({
+            where: { expiresAt: { lte: now } },
+            orderBy: { expiresAt: "asc" }
+          })
+        ).map(mapAuthSession),
+      findRevoked: async () =>
+        (
+          await db.authSession.findMany({
+            where: { revokedAt: { not: null } },
+            orderBy: { revokedAt: "asc" }
+          })
+        ).map(mapAuthSession),
       save: async (session) =>
         mapAuthSession(
           await db.authSession.update({

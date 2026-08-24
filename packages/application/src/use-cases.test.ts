@@ -45,7 +45,8 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
       return row;
     },
     findByEmail: async (email: string) => [...this.userCredentialRows.values()].find((row) => row.email === email) ?? null,
-    findByUserId: async (userId: string) => [...this.userCredentialRows.values()].find((row) => row.userId === userId) ?? null
+    findByUserId: async (userId: string) => [...this.userCredentialRows.values()].find((row) => row.userId === userId) ?? null,
+    count: async () => this.userCredentialRows.size
   };
   authSessions = {
     create: async (input: {
@@ -67,6 +68,8 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
       return row;
     },
     findById: async (id: string) => this.authSessionRows.get(id) ?? null,
+    findExpired: async (now: Date) => [...this.authSessionRows.values()].filter((session) => session.expiresAt.getTime() <= now.getTime()),
+    findRevoked: async () => [...this.authSessionRows.values()].filter((session) => Boolean(session.revokedAt)),
     save: async (session: AuthSession) => {
       this.authSessionRows.set(session.id, session);
       return session;
