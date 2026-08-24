@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
+import 'application/auth_controller.dart';
 import 'application/wardrobe_controller.dart';
+import 'data/auth_repository.dart';
 import 'data/closet_api_client.dart';
+import 'data/token_storage.dart';
 import 'data/wardrobe_repository.dart';
 import 'domain/garment.dart';
 
@@ -11,18 +14,30 @@ const defaultApiBaseUrl = String.fromEnvironment(
 );
 
 void main() {
+  final tokenStorage = SecureTokenStorage();
+  final apiClient = ClosetApiClient(
+    baseUrl: Uri.parse(defaultApiBaseUrl),
+    tokenStorage: tokenStorage,
+  );
+  final authRepository = ApiAuthRepository(apiClient, tokenStorage);
+  final authController = AuthController(authRepository);
+  apiClient.onSessionExpired = () async => authController.markSignedOut();
   runApp(
     ClosetAiApp(
-      wardrobeRepository: ApiWardrobeRepository(
-        ClosetApiClient(baseUrl: Uri.parse(defaultApiBaseUrl)),
-      ),
+      authController: authController,
+      wardrobeRepository: ApiWardrobeRepository(apiClient),
     ),
   );
 }
 
 class ClosetAiApp extends StatelessWidget {
-  const ClosetAiApp({required this.wardrobeRepository, super.key});
+  const ClosetAiApp({
+    required this.authController,
+    required this.wardrobeRepository,
+    super.key,
+  });
 
+  final AuthController authController;
   final WardrobeRepository wardrobeRepository;
 
   @override
@@ -39,16 +54,167 @@ class ClosetAiApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF7F7F2),
         useMaterial3: true,
       ),
-      home: WardrobeHomeScreen(
-        controller: WardrobeController(wardrobeRepository),
+      home: AuthenticatedAppShell(
+        authController: authController,
+        wardrobeRepository: wardrobeRepository,
       ),
     );
   }
 }
 
-class WardrobeHomeScreen extends StatefulWidget {
-  const WardrobeHomeScreen({required this.controller, super.key});
+class AuthenticatedAppShell extends StatefulWidget {
+  const AuthenticatedAppShell({
+    required this.authController,
+    required this.wardrobeRepository,
+    super.key,
+  });
 
+  final AuthController authController;
+  final WardrobeRepository wardrobeRepository;
+
+  @override
+  State<AuthenticatedAppShell> createState() => _AuthenticatedAppShellState();
+}
+
+class _AuthenticatedAppShellState extends State<AuthenticatedAppShell> {
+  WardrobeController? _wardrobeController;
+
+  AuthController get _authController => widget.authController;
+
+  @override
+  void initState() {
+    super.initState();
+    _authController.addListener(_handleControllerChange);
+    _authController.initialize();
+  }
+
+  @override
+  void dispose() {
+    _authController.removeListener(_handleControllerChange);
+    _wardrobeController?.dispose();
+    super.dispose();
+  }
+
+  void _handleControllerChange() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    switch (_authController.status) {
+      case AuthStatus.checking:
+        return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      case AuthStatus.signedOut:
+        _wardrobeController?.dispose();
+        _wardrobeController = null;
+        return LoginScreen(controller: _authController);
+      case AuthStatus.signedIn:
+        _wardrobeController ??= WardrobeController(widget.wardrobeRepository)
+          ..loadGarments();
+        return WardrobeHomeScreen(
+          authController: _authController,
+          controller: _wardrobeController!,
+        );
+    }
+  }
+}
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({required this.controller, super.key});
+
+  final AuthController controller;
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    return Scaffold(
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            const SizedBox(height: 48),
+            Text(
+              'CLOSET AI',
+              style: textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 28),
+            TextField(
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              autofillHints: const [AutofillHints.email],
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                labelText: 'Email',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _passwordController,
+              obscureText: true,
+              autofillHints: const [AutofillHints.password],
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                labelText: 'Password',
+              ),
+              onSubmitted: (_) => _login(),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: widget.controller.status == AuthStatus.checking
+                  ? null
+                  : _login,
+              icon: const Icon(Icons.login),
+              label: const Text('Sign in'),
+            ),
+            if (widget.controller.errorMessage != null) ...[
+              const SizedBox(height: 16),
+              Text(
+                widget.controller.errorMessage!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _login() {
+    return widget.controller.login(
+      email: _emailController.text,
+      password: _passwordController.text,
+    );
+  }
+}
+
+class WardrobeHomeScreen extends StatefulWidget {
+  const WardrobeHomeScreen({
+    required this.authController,
+    required this.controller,
+    super.key,
+  });
+
+  final AuthController authController;
   final WardrobeController controller;
 
   @override
@@ -56,8 +222,6 @@ class WardrobeHomeScreen extends StatefulWidget {
 }
 
 class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
-  final _userIdController = TextEditingController();
-
   WardrobeController get _controller => widget.controller;
 
   @override
@@ -69,7 +233,6 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
   @override
   void dispose() {
     _controller.removeListener(_handleControllerChange);
-    _userIdController.dispose();
     super.dispose();
   }
 
@@ -84,7 +247,17 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Closet AI'), centerTitle: false),
+      appBar: AppBar(
+        title: const Text('Closet AI'),
+        centerTitle: false,
+        actions: [
+          IconButton(
+            onPressed: widget.authController.logout,
+            icon: const Icon(Icons.logout),
+            tooltip: 'Sign out',
+          ),
+        ],
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),
@@ -96,15 +269,6 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            TextField(
-              controller: _userIdController,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                labelText: 'User ID',
-              ),
-              onSubmitted: (_) => _loadGarments(),
-            ),
-            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
@@ -152,7 +316,7 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
   }
 
   Future<void> _loadGarments() {
-    return _controller.loadGarments(_userIdController.text);
+    return _controller.loadGarments();
   }
 
   Future<void> _showCreateGarmentDialog() async {
@@ -166,7 +330,6 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
     }
 
     await _controller.createGarment(
-      userId: _userIdController.text,
       category: result.category,
       primaryColor: result.primaryColor,
       status: result.status,

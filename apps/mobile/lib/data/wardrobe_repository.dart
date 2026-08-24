@@ -2,10 +2,9 @@ import '../domain/garment.dart';
 import 'closet_api_client.dart';
 
 abstract interface class WardrobeRepository {
-  Future<List<Garment>> listGarments(String userId);
+  Future<List<Garment>> listGarments();
 
   Future<Garment> createGarment({
-    required String userId,
     required String category,
     required String primaryColor,
     required String status,
@@ -19,18 +18,14 @@ class ApiWardrobeRepository implements WardrobeRepository {
   final ClosetApiClient _apiClient;
 
   @override
-  Future<List<Garment>> listGarments(String userId) async {
-    final rows = await _apiClient.getList(
-      '/garments',
-      query: {'userId': userId},
-    );
+  Future<List<Garment>> listGarments() async {
+    final rows = await _apiClient.getList('/garments');
 
     return rows.map(Garment.fromJson).toList(growable: false);
   }
 
   @override
   Future<Garment> createGarment({
-    required String userId,
     required String category,
     required String primaryColor,
     required String status,
@@ -39,7 +34,6 @@ class ApiWardrobeRepository implements WardrobeRepository {
     final row = await _apiClient.postObject(
       '/garments',
       body: {
-        'userId': userId,
         'category': category,
         'primaryColor': primaryColor,
         'status': status,

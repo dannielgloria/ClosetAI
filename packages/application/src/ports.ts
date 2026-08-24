@@ -1,10 +1,12 @@
 import {
+  AuthSession,
   ClosetUser,
   EntityId,
   Garment,
   GarmentUsageEvent,
   Household,
-  Outfit
+  Outfit,
+  UserCredential
 } from "@closet-ai/domain";
 
 export interface CreateHouseholdRecord {
@@ -20,6 +22,25 @@ export interface HouseholdRepositoryPort {
 export interface UserRepositoryPort {
   create(input: { householdId: EntityId; displayName: string }): Promise<ClosetUser>;
   findById(id: EntityId): Promise<ClosetUser | null>;
+}
+
+export interface UserCredentialRepositoryPort {
+  create(input: { userId: EntityId; email: string; passwordHash: string }): Promise<UserCredential>;
+  findByEmail(email: string): Promise<UserCredential | null>;
+  findByUserId(userId: EntityId): Promise<UserCredential | null>;
+}
+
+export interface AuthSessionRepositoryPort {
+  create(input: {
+    userId: EntityId;
+    refreshTokenHash: string;
+    expiresAt: Date;
+    deviceName?: string;
+    devicePlatform?: string;
+    userAgent?: string;
+  }): Promise<AuthSession>;
+  findById(id: EntityId): Promise<AuthSession | null>;
+  save(session: AuthSession): Promise<AuthSession>;
 }
 
 export interface GarmentRepositoryPort {
@@ -59,6 +80,8 @@ export interface UnitOfWorkPort {
 export interface ApplicationPorts {
   households: HouseholdRepositoryPort;
   users: UserRepositoryPort;
+  userCredentials: UserCredentialRepositoryPort;
+  authSessions: AuthSessionRepositoryPort;
   garments: GarmentRepositoryPort;
   outfits: OutfitRepositoryPort;
   usageEvents: UsageEventRepositoryPort;

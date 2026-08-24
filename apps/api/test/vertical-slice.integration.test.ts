@@ -20,6 +20,12 @@ interface UserResponse {
   displayName: string;
 }
 
+interface AuthResponse {
+  accessToken: string;
+  refreshToken: string;
+  user: UserResponse;
+}
+
 interface GarmentResponse {
   id: string;
   userId: string;
@@ -44,7 +50,7 @@ interface ConfirmUsageResponse {
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
-describe("MVP vertical slice with PostgreSQL", () => {
+describe("MVP vertical slice with authentication and PostgreSQL", () => {
   let container: StartedTestContainer;
   let app: INestApplication;
   let prisma: PrismaClient;
@@ -66,6 +72,9 @@ describe("MVP vertical slice with PostgreSQL", () => {
     )}/closet_ai_test?schema=public`;
 
     process.env.DATABASE_URL = databaseUrl;
+    process.env.JWT_ACCESS_SECRET = "test-access-secret";
+    process.env.JWT_ACCESS_TTL = "15m";
+    process.env.JWT_REFRESH_TTL = "30d";
     execFileSync("pnpm", ["prisma", "migrate", "deploy"], {
       cwd: rootDir,
       env: { ...process.env, DATABASE_URL: databaseUrl },
@@ -95,6 +104,8 @@ describe("MVP vertical slice with PostgreSQL", () => {
     await prisma.outfitItem.deleteMany();
     await prisma.outfit.deleteMany();
     await prisma.garment.deleteMany();
+    await prisma.authSession.deleteMany();
+    await prisma.userCredential.deleteMany();
     await prisma.user.deleteMany();
     await prisma.household.deleteMany();
   });
@@ -105,17 +116,46 @@ describe("MVP vertical slice with PostgreSQL", () => {
     await container?.stop();
   });
 
-  it("creates household, user, garments, outfit selection, usage, and persisted usage events", async () => {
-    const { user } = await createHousehold("Home", "User A");
-    await createUser(user.householdId, "User B");
+  it("authenticates, refreshes, rotates refresh tokens, and revokes logout sessions", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
 
-    const top = await createGarment(user.id, "TOP", "black", "CLEAN_AVAILABLE", "Black tee");
-    const bottom = await createGarment(user.id, "BOTTOM", "indigo", "WORN_REUSABLE", "Jeans");
-    const footwear = await createGarment(user.id, "FOOTWEAR", "white", "CLEAN_AVAILABLE", "Sneakers");
+    await request(app.getHttpServer()).get("/api/v1/auth/me").set(authHeader(auth.accessToken)).expect(200);
+    await request(app.getHttpServer()).get("/api/v1/garments").set(authHeader(auth.accessToken)).expect(200);
+
+    const refreshed = await request(app.getHttpServer())
+      .post("/api/v1/auth/refresh")
+      .send({ refreshToken: auth.refreshToken })
+      .expect(200)
+      .then((response) => {
+        expect(response.body).not.toHaveProperty("session");
+        return response.body as AuthResponse;
+      });
+
+    expect(refreshed.refreshToken).not.toBe(auth.refreshToken);
+    await request(app.getHttpServer()).get("/api/v1/auth/me").set(authHeader(refreshed.accessToken)).expect(200);
+
+    await request(app.getHttpServer()).post("/api/v1/auth/refresh").send({ refreshToken: auth.refreshToken }).expect(401);
+    await expect(prisma.authSession.findUniqueOrThrow({ where: { id: auth.refreshToken.split(".")[0] } })).resolves.toMatchObject({
+      revokedAt: expect.any(Date)
+    });
+
+    const freshLogin = await login("user-a@example.com");
+    await request(app.getHttpServer()).post("/api/v1/auth/logout").set(authHeader(freshLogin.accessToken)).expect(200);
+    await request(app.getHttpServer()).post("/api/v1/auth/refresh").send({ refreshToken: freshLogin.refreshToken }).expect(401);
+    await request(app.getHttpServer()).get("/api/v1/auth/me").set(authHeader(freshLogin.accessToken)).expect(401);
+  });
+
+  it("creates garments, lists available garments, selects outfit, confirms usage, and persists usage events", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    await createUser(auth.user.householdId, "User B");
+
+    const top = await createGarment(auth.accessToken, "TOP", "black", "CLEAN_AVAILABLE", "Black tee");
+    const bottom = await createGarment(auth.accessToken, "BOTTOM", "indigo", "WORN_REUSABLE", "Jeans");
+    const footwear = await createGarment(auth.accessToken, "FOOTWEAR", "white", "CLEAN_AVAILABLE", "Sneakers");
 
     const garments = await request(app.getHttpServer())
       .get("/api/v1/garments")
-      .query({ userId: user.id })
+      .set(authHeader(auth.accessToken))
       .expect(200)
       .then((response) => response.body as GarmentResponse[]);
 
@@ -123,7 +163,7 @@ describe("MVP vertical slice with PostgreSQL", () => {
 
     const available = await request(app.getHttpServer())
       .get("/api/v1/garments/available")
-      .query({ userId: user.id })
+      .set(authHeader(auth.accessToken))
       .expect(200)
       .then((response) => response.body as GarmentResponse[]);
 
@@ -131,7 +171,8 @@ describe("MVP vertical slice with PostgreSQL", () => {
 
     const outfit = await request(app.getHttpServer())
       .post("/api/v1/outfit-recommendations")
-      .send({ userId: user.id })
+      .set(authHeader(auth.accessToken))
+      .send({})
       .expect(201)
       .then((response) => response.body as OutfitResponse);
 
@@ -139,7 +180,8 @@ describe("MVP vertical slice with PostgreSQL", () => {
 
     const selected = await request(app.getHttpServer())
       .post(`/api/v1/outfits/${outfit.id}/select`)
-      .send({ userId: user.id })
+      .set(authHeader(auth.accessToken))
+      .send({})
       .expect(200)
       .then((response) => response.body as OutfitResponse);
 
@@ -148,7 +190,8 @@ describe("MVP vertical slice with PostgreSQL", () => {
 
     const confirmed = await request(app.getHttpServer())
       .post(`/api/v1/outfits/${outfit.id}/confirm-usage`)
-      .send({ userId: user.id, context: { activity: "HOME_OFFICE" } })
+      .set(authHeader(auth.accessToken))
+      .send({ context: { activity: "HOME_OFFICE" } })
       .expect(200)
       .then((response) => response.body as ConfirmUsageResponse);
 
@@ -161,75 +204,102 @@ describe("MVP vertical slice with PostgreSQL", () => {
     await expectLastWornAt(top.id);
     await expect(prisma.garmentUsageEvent.count({ where: { outfitId: outfit.id } })).resolves.toBe(3);
 
-    await request(app.getHttpServer()).post(`/api/v1/outfits/${outfit.id}/confirm-usage`).send({ userId: user.id }).expect(200);
+    await request(app.getHttpServer())
+      .post(`/api/v1/outfits/${outfit.id}/confirm-usage`)
+      .set(authHeader(auth.accessToken))
+      .send({})
+      .expect(200);
 
     await expect(prisma.garmentUsageEvent.count({ where: { outfitId: outfit.id } })).resolves.toBe(3);
     await expectWearCount(top.id, 1);
   });
 
-  it("does not use USER_A garments when USER_B requests an outfit", async () => {
-    const { user: userA } = await createHousehold("Home", "User A");
-    const userB = await createUser(userA.householdId, "User B");
-    await createGarment(userA.id, "TOP", "black");
-    await createGarment(userA.id, "BOTTOM", "indigo");
-    await createGarment(userA.id, "FOOTWEAR", "white");
+  it("does not expose USER_B garments to USER_A", async () => {
+    const { auth: userA } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const userB = await createUser(userA.user.householdId, "User B");
+    await bootstrapCredentials(userB.id, "user-b@example.com", "correct-password");
+    const userBAuth = await login("user-b@example.com");
 
-    await request(app.getHttpServer()).post("/api/v1/outfit-recommendations").send({ userId: userB.id }).expect(400);
-    await expect(prisma.outfit.count({ where: { userId: userB.id } })).resolves.toBe(0);
+    await createGarment(userA.accessToken, "TOP", "black");
+    const userBGarment = await createGarment(userBAuth.accessToken, "TOP", "red");
+
+    const garmentsForA = await request(app.getHttpServer())
+      .get("/api/v1/garments")
+      .set(authHeader(userA.accessToken))
+      .expect(200)
+      .then((response) => response.body as GarmentResponse[]);
+
+    expect(garmentsForA.map((garment) => garment.id)).not.toContain(userBGarment.id);
   });
 
-  it("does not include unavailable garments in generated outfits", async () => {
-    const { user } = await createHousehold("Home", "User A");
-    const unavailableTop = await createGarment(user.id, "TOP", "red", "LAUNDRY_BIN");
-    await createGarment(user.id, "BOTTOM", "indigo");
-    await createGarment(user.id, "FOOTWEAR", "white");
+  it("rejects outfit selection and usage confirmation across users", async () => {
+    const { auth: userA } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const userB = await createUser(userA.user.householdId, "User B");
+    await bootstrapCredentials(userB.id, "user-b@example.com", "correct-password");
+    const userBAuth = await login("user-b@example.com");
+
+    await createGarment(userBAuth.accessToken, "TOP", "black");
+    await createGarment(userBAuth.accessToken, "BOTTOM", "indigo");
+    await createGarment(userBAuth.accessToken, "FOOTWEAR", "white");
+    const outfitB = await request(app.getHttpServer())
+      .post("/api/v1/outfit-recommendations")
+      .set(authHeader(userBAuth.accessToken))
+      .send({})
+      .expect(201)
+      .then((response) => response.body as OutfitResponse);
+
+    await request(app.getHttpServer()).post(`/api/v1/outfits/${outfitB.id}/select`).set(authHeader(userA.accessToken)).send({}).expect(404);
+    await request(app.getHttpServer())
+      .post(`/api/v1/outfits/${outfitB.id}/confirm-usage`)
+      .set(authHeader(userA.accessToken))
+      .send({})
+      .expect(404);
+  });
+
+  it("does not include unavailable garments and rejects invalid usage transitions", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const unavailableTop = await createGarment(auth.accessToken, "TOP", "red", "LAUNDRY_BIN");
+    await createGarment(auth.accessToken, "BOTTOM", "indigo");
+    await createGarment(auth.accessToken, "FOOTWEAR", "white");
 
     const available = await request(app.getHttpServer())
       .get("/api/v1/garments/available")
-      .query({ userId: user.id })
+      .set(authHeader(auth.accessToken))
       .expect(200)
       .then((response) => response.body as GarmentResponse[]);
 
     expect(available.map((garment) => garment.id)).not.toContain(unavailableTop.id);
-    await request(app.getHttpServer()).post("/api/v1/outfit-recommendations").send({ userId: user.id }).expect(400);
-  });
+    await request(app.getHttpServer()).post("/api/v1/outfit-recommendations").set(authHeader(auth.accessToken)).send({}).expect(400);
 
-  it("partial usage confirmation only affects garments actually worn", async () => {
-    const { user } = await createHousehold("Home", "User A");
-    const top = await createGarment(user.id, "TOP", "black");
-    const bottom = await createGarment(user.id, "BOTTOM", "indigo");
-    const footwear = await createGarment(user.id, "FOOTWEAR", "white");
+    await createGarment(auth.accessToken, "TOP", "black");
+    await createGarment(auth.accessToken, "BOTTOM", "blue");
+    await createGarment(auth.accessToken, "FOOTWEAR", "white");
     const outfit = await request(app.getHttpServer())
       .post("/api/v1/outfit-recommendations")
-      .send({ userId: user.id })
+      .set(authHeader(auth.accessToken))
+      .send({})
       .expect(201)
       .then((response) => response.body as OutfitResponse);
 
-    await request(app.getHttpServer()).post(`/api/v1/outfits/${outfit.id}/select`).send({ userId: user.id }).expect(200);
     await request(app.getHttpServer())
       .post(`/api/v1/outfits/${outfit.id}/confirm-usage`)
-      .send({ userId: user.id, wornGarmentIds: [top.id, footwear.id] })
+      .set(authHeader(auth.accessToken))
+      .send({})
+      .expect(400);
+
+    await request(app.getHttpServer()).post(`/api/v1/outfits/${outfit.id}/select`).set(authHeader(auth.accessToken)).send({}).expect(200);
+    const wornGarmentIds = [outfit.items[0].garmentId, outfit.items[2].garmentId];
+    const notWornGarmentId = outfit.items[1].garmentId;
+    await request(app.getHttpServer())
+      .post(`/api/v1/outfits/${outfit.id}/confirm-usage`)
+      .set(authHeader(auth.accessToken))
+      .send({ wornGarmentIds })
       .expect(200);
 
-    await expectWearCount(top.id, 1);
-    await expectWearCount(footwear.id, 1);
-    await expectWearCount(bottom.id, 0);
+    await expectWearCount(wornGarmentIds[0], 1);
+    await expectWearCount(wornGarmentIds[1], 1);
+    await expectWearCount(notWornGarmentId, 0);
     await expect(prisma.garmentUsageEvent.count({ where: { outfitId: outfit.id } })).resolves.toBe(2);
-  });
-
-  it("rejects invalid usage transition before outfit selection", async () => {
-    const { user } = await createHousehold("Home", "User A");
-    await createGarment(user.id, "TOP", "black");
-    await createGarment(user.id, "BOTTOM", "indigo");
-    await createGarment(user.id, "FOOTWEAR", "white");
-    const outfit = await request(app.getHttpServer())
-      .post("/api/v1/outfit-recommendations")
-      .send({ userId: user.id })
-      .expect(201)
-      .then((response) => response.body as OutfitResponse);
-
-    await request(app.getHttpServer()).post(`/api/v1/outfits/${outfit.id}/confirm-usage`).send({ userId: user.id }).expect(400);
-    await expect(prisma.garmentUsageEvent.count({ where: { outfitId: outfit.id } })).resolves.toBe(0);
   });
 
   async function createHousehold(name: string, initialUserDisplayName: string): Promise<HouseholdResponse> {
@@ -248,8 +318,29 @@ describe("MVP vertical slice with PostgreSQL", () => {
       .then((response) => response.body as UserResponse);
   }
 
+  async function createAuthenticatedUser(displayName: string, email: string) {
+    const { user } = await createHousehold("Home", displayName);
+    await bootstrapCredentials(user.id, email, "correct-password");
+    return { user, auth: await login(email) };
+  }
+
+  async function bootstrapCredentials(userId: string, email: string, password: string) {
+    return request(app.getHttpServer()).post("/api/v1/auth/bootstrap-credentials").send({ userId, email, password }).expect(201);
+  }
+
+  async function login(email: string): Promise<AuthResponse> {
+    return request(app.getHttpServer())
+      .post("/api/v1/auth/login")
+      .send({ email, password: "correct-password", devicePlatform: "integration-test" })
+      .expect(200)
+      .then((response) => {
+        expect(response.body).not.toHaveProperty("session");
+        return response.body as AuthResponse;
+      });
+  }
+
   async function createGarment(
-    userId: string,
+    accessToken: string,
     category: string,
     primaryColor: string,
     status = "CLEAN_AVAILABLE",
@@ -257,7 +348,8 @@ describe("MVP vertical slice with PostgreSQL", () => {
   ): Promise<GarmentResponse> {
     return request(app.getHttpServer())
       .post("/api/v1/garments")
-      .send({ userId, category, primaryColor, status, name })
+      .set(authHeader(accessToken))
+      .send({ category, primaryColor, status, name })
       .expect(201)
       .then((response) => response.body as GarmentResponse);
   }
@@ -271,3 +363,7 @@ describe("MVP vertical slice with PostgreSQL", () => {
     expect(garment.lastWornAt).toBeInstanceOf(Date);
   }
 });
+
+function authHeader(accessToken: string) {
+  return { Authorization: `Bearer ${accessToken}` };
+}

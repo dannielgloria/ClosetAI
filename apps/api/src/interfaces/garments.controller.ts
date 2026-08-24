@@ -1,18 +1,23 @@
-import { Body, Controller, Get, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
 import {
+  ApiBearerAuth,
   ApiBadRequestResponse,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
-  ApiQuery,
-  ApiTags
+  ApiTags,
+  ApiUnauthorizedResponse
 } from "@nestjs/swagger";
-import { CreateGarmentUseCase, ListAvailableGarmentsUseCase, ListGarmentsUseCase } from "@closet-ai/application";
+import { AuthenticatedUser, CreateGarmentUseCase, ListAvailableGarmentsUseCase, ListGarmentsUseCase } from "@closet-ai/application";
+import { CurrentUser } from "../auth/current-user.decorator.js";
+import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import { ApplicationPortFactory } from "../prisma/application-port-factory.js";
 import { CreateGarmentDto, GarmentResponseDto } from "./dtos.js";
 import { mapUseCaseError } from "./http-errors.js";
 
 @ApiTags("garments")
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller("garments")
 export class GarmentsController {
   constructor(private readonly portFactory: ApplicationPortFactory) {}
@@ -21,9 +26,10 @@ export class GarmentsController {
   @ApiOperation({ summary: "Create a garment owned by a user." })
   @ApiCreatedResponse({ type: GarmentResponseDto })
   @ApiBadRequestResponse({ description: "Invalid request body or user not found." })
-  async createGarment(@Body() body: CreateGarmentDto) {
+  @ApiUnauthorizedResponse({ description: "Missing, invalid, or revoked access token." })
+  async createGarment(@CurrentUser() currentUser: AuthenticatedUser, @Body() body: CreateGarmentDto) {
     try {
-      return await new CreateGarmentUseCase(this.portFactory.create()).execute(body);
+      return await new CreateGarmentUseCase(this.portFactory.create()).execute({ ...body, userId: currentUser.userId });
     } catch (error) {
       mapUseCaseError(error);
     }
@@ -31,12 +37,11 @@ export class GarmentsController {
 
   @Get()
   @ApiOperation({ summary: "List all garments for a user." })
-  @ApiQuery({ name: "userId", required: true })
   @ApiOkResponse({ type: [GarmentResponseDto] })
-  @ApiBadRequestResponse({ description: "Missing or invalid user id." })
-  async listGarments(@Query("userId") userId: string) {
+  @ApiUnauthorizedResponse({ description: "Missing, invalid, or revoked access token." })
+  async listGarments(@CurrentUser() currentUser: AuthenticatedUser) {
     try {
-      return await new ListGarmentsUseCase(this.portFactory.create()).execute({ userId });
+      return await new ListGarmentsUseCase(this.portFactory.create()).execute({ userId: currentUser.userId });
     } catch (error) {
       mapUseCaseError(error);
     }
@@ -44,12 +49,11 @@ export class GarmentsController {
 
   @Get("available")
   @ApiOperation({ summary: "List garments eligible for outfit generation." })
-  @ApiQuery({ name: "userId", required: true })
   @ApiOkResponse({ type: [GarmentResponseDto] })
-  @ApiBadRequestResponse({ description: "Missing or invalid user id." })
-  async listAvailableGarments(@Query("userId") userId: string) {
+  @ApiUnauthorizedResponse({ description: "Missing, invalid, or revoked access token." })
+  async listAvailableGarments(@CurrentUser() currentUser: AuthenticatedUser) {
     try {
-      return await new ListAvailableGarmentsUseCase(this.portFactory.create()).execute({ userId });
+      return await new ListAvailableGarmentsUseCase(this.portFactory.create()).execute({ userId: currentUser.userId });
     } catch (error) {
       mapUseCaseError(error);
     }

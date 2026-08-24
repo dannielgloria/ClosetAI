@@ -1,4 +1,5 @@
 import {
+  AuthSession,
   ClosetUser,
   Garment,
   GarmentCategory,
@@ -6,11 +7,32 @@ import {
   GarmentUsageEvent,
   Household,
   Outfit,
-  OutfitStatus
+  OutfitStatus,
+  UserCredential
 } from "@closet-ai/domain";
 
 type PrismaHousehold = { id: string; name: string; createdAt: Date };
 type PrismaUser = { id: string; householdId: string; displayName: string; createdAt: Date };
+type PrismaUserCredential = {
+  id: string;
+  userId: string;
+  email: string;
+  passwordHash: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+type PrismaAuthSession = {
+  id: string;
+  userId: string;
+  refreshTokenHash: string;
+  createdAt: Date;
+  expiresAt: Date;
+  lastUsedAt: Date | null;
+  revokedAt: Date | null;
+  deviceName: string | null;
+  devicePlatform: string | null;
+  userAgent: string | null;
+};
 type PrismaGarment = {
   id: string;
   userId: string;
@@ -50,6 +72,32 @@ export function mapHousehold(row: PrismaHousehold): Household {
 
 export function mapUser(row: PrismaUser): ClosetUser {
   return { id: row.id, householdId: row.householdId, displayName: row.displayName, createdAt: row.createdAt };
+}
+
+export function mapUserCredential(row: PrismaUserCredential): UserCredential {
+  return {
+    id: row.id,
+    userId: row.userId,
+    email: row.email,
+    passwordHash: row.passwordHash,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+export function mapAuthSession(row: PrismaAuthSession): AuthSession {
+  return {
+    id: row.id,
+    userId: row.userId,
+    refreshTokenHash: row.refreshTokenHash,
+    createdAt: row.createdAt,
+    expiresAt: row.expiresAt,
+    lastUsedAt: row.lastUsedAt,
+    revokedAt: row.revokedAt,
+    deviceName: row.deviceName ?? undefined,
+    devicePlatform: row.devicePlatform ?? undefined,
+    userAgent: row.userAgent ?? undefined
+  };
 }
 
 export function mapGarment(row: PrismaGarment): Garment {

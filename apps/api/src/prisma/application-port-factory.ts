@@ -2,16 +2,18 @@ import { Injectable } from "@nestjs/common";
 import { Prisma, PrismaClient } from "@prisma/client";
 import {
   ApplicationPorts,
+  AuthSessionRepositoryPort,
   GarmentRepositoryPort,
   HouseholdRepositoryPort,
   OutfitRepositoryPort,
   UnitOfWorkPort,
   UsageEventRepositoryPort,
+  UserCredentialRepositoryPort,
   UserRepositoryPort
 } from "@closet-ai/application";
 import { GarmentStatus } from "@closet-ai/domain";
 import { PrismaService } from "./prisma.service.js";
-import { mapGarment, mapHousehold, mapOutfit, mapUsageEvent, mapUser } from "./mappers.js";
+import { mapAuthSession, mapGarment, mapHousehold, mapOutfit, mapUsageEvent, mapUser, mapUserCredential } from "./mappers.js";
 
 type PrismaTransactionClient = Prisma.TransactionClient;
 type DbClient = PrismaClient | PrismaTransactionClient;
@@ -24,6 +26,8 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
     return {
       households: this.createHouseholdRepository(db),
       users: this.createUserRepository(db),
+      userCredentials: this.createUserCredentialRepository(db),
+      authSessions: this.createAuthSessionRepository(db),
       garments: this.createGarmentRepository(db),
       outfits: this.createOutfitRepository(db),
       usageEvents: this.createUsageEventRepository(db)
@@ -65,6 +69,66 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
         const row = await db.user.findUnique({ where: { id } });
         return row ? mapUser(row) : null;
       }
+    };
+  }
+
+  private createUserCredentialRepository(db: DbClient): UserCredentialRepositoryPort {
+    return {
+      create: async (input) =>
+        mapUserCredential(
+          await db.userCredential.create({
+            data: {
+              userId: input.userId,
+              email: input.email,
+              passwordHash: input.passwordHash
+            }
+          })
+        ),
+      findByEmail: async (email) => {
+        const row = await db.userCredential.findUnique({ where: { email } });
+        return row ? mapUserCredential(row) : null;
+      },
+      findByUserId: async (userId) => {
+        const row = await db.userCredential.findUnique({ where: { userId } });
+        return row ? mapUserCredential(row) : null;
+      }
+    };
+  }
+
+  private createAuthSessionRepository(db: DbClient): AuthSessionRepositoryPort {
+    return {
+      create: async (input) =>
+        mapAuthSession(
+          await db.authSession.create({
+            data: {
+              userId: input.userId,
+              refreshTokenHash: input.refreshTokenHash,
+              expiresAt: input.expiresAt,
+              deviceName: input.deviceName,
+              devicePlatform: input.devicePlatform,
+              userAgent: input.userAgent
+            }
+          })
+        ),
+      findById: async (id) => {
+        const row = await db.authSession.findUnique({ where: { id } });
+        return row ? mapAuthSession(row) : null;
+      },
+      save: async (session) =>
+        mapAuthSession(
+          await db.authSession.update({
+            where: { id: session.id },
+            data: {
+              refreshTokenHash: session.refreshTokenHash,
+              expiresAt: session.expiresAt,
+              lastUsedAt: session.lastUsedAt,
+              revokedAt: session.revokedAt,
+              deviceName: session.deviceName,
+              devicePlatform: session.devicePlatform,
+              userAgent: session.userAgent
+            }
+          })
+        )
     };
   }
 

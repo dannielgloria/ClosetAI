@@ -1,4 +1,7 @@
+import 'package:closet_ai_mobile/application/auth_controller.dart';
+import 'package:closet_ai_mobile/data/auth_repository.dart';
 import 'package:closet_ai_mobile/data/wardrobe_repository.dart';
+import 'package:closet_ai_mobile/domain/auth_user.dart';
 import 'package:closet_ai_mobile/domain/garment.dart';
 import 'package:closet_ai_mobile/main.dart';
 import 'package:flutter/material.dart';
@@ -8,11 +11,25 @@ void main() {
   testWidgets('lists and registers garments through the injected repository', (
     tester,
   ) async {
+    final authRepository = FakeAuthRepository();
     final repository = FakeWardrobeRepository();
 
-    await tester.pumpWidget(ClosetAiApp(wardrobeRepository: repository));
-    await tester.enterText(find.byType(TextField).first, 'user-1');
-    await tester.tap(find.text('Load garments'));
+    await tester.pumpWidget(
+      ClosetAiApp(
+        authController: AuthController(authRepository),
+        wardrobeRepository: repository,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Email'),
+      'user@example.com',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Password'),
+      'correct-password',
+    );
+    await tester.tap(find.text('Sign in'));
     await tester.pumpAndSettle();
 
     expect(find.text('Digital Closet'), findsOneWidget);
@@ -53,7 +70,6 @@ class FakeWardrobeRepository implements WardrobeRepository {
 
   @override
   Future<Garment> createGarment({
-    required String userId,
     required String category,
     required String primaryColor,
     required String status,
@@ -62,7 +78,7 @@ class FakeWardrobeRepository implements WardrobeRepository {
     createdGarments += 1;
     final garment = Garment(
       id: 'garment-${_garments.length + 1}',
-      userId: userId,
+      userId: 'user-1',
       category: category,
       primaryColor: primaryColor,
       status: status,
@@ -75,9 +91,33 @@ class FakeWardrobeRepository implements WardrobeRepository {
   }
 
   @override
-  Future<List<Garment>> listGarments(String userId) async {
-    return _garments
-        .where((garment) => garment.userId == userId)
-        .toList(growable: false);
+  Future<List<Garment>> listGarments() async {
+    return _garments.toList(growable: false);
+  }
+}
+
+class FakeAuthRepository implements AuthRepository {
+  bool loggedOut = false;
+
+  @override
+  Future<AuthUser> login({
+    required String email,
+    required String password,
+  }) async {
+    return const AuthUser(
+      id: 'user-1',
+      householdId: 'household-1',
+      displayName: 'Dann',
+    );
+  }
+
+  @override
+  Future<void> logout() async {
+    loggedOut = true;
+  }
+
+  @override
+  Future<AuthUser?> restoreSession() async {
+    return null;
   }
 }

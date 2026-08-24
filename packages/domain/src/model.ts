@@ -87,3 +87,25 @@ export interface GarmentUsageEvent {
   wornAt: Date;
   context: Record<string, unknown>;
 }
+
+export interface UserCredential {
+  id: EntityId;
+  userId: EntityId;
+  email: string;
+  passwordHash: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface AuthSession {
+  id: EntityId;
+  userId: EntityId;
+  refreshTokenHash: string;
+  createdAt: Date;
+  expiresAt: Date;
+  lastUsedAt: Date | null;
+  revokedAt: Date | null;
+  deviceName?: string;
+  devicePlatform?: string;
+  userAgent?: string;
+}

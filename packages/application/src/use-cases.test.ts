@@ -7,7 +7,9 @@ import {
   GarmentUsageEvent,
   Household,
   Outfit,
-  OutfitStatus
+  OutfitStatus,
+  UserCredential,
+  AuthSession
 } from "@closet-ai/domain";
 import { ApplicationPorts, UnitOfWorkPort } from "./ports.js";
 import {
@@ -29,6 +31,46 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
       throw new Error("not implemented");
     },
     findById: async (id: string) => this.userRows.get(id) ?? null
+  };
+  userCredentials = {
+    create: async (input: { userId: string; email: string; passwordHash: string }) => {
+      const now = new Date("2026-08-23T00:00:00.000Z");
+      const row: UserCredential = {
+        id: `credential-${this.userCredentialRows.size + 1}`,
+        createdAt: now,
+        updatedAt: now,
+        ...input
+      };
+      this.userCredentialRows.set(row.id, row);
+      return row;
+    },
+    findByEmail: async (email: string) => [...this.userCredentialRows.values()].find((row) => row.email === email) ?? null,
+    findByUserId: async (userId: string) => [...this.userCredentialRows.values()].find((row) => row.userId === userId) ?? null
+  };
+  authSessions = {
+    create: async (input: {
+      userId: string;
+      refreshTokenHash: string;
+      expiresAt: Date;
+      deviceName?: string;
+      devicePlatform?: string;
+      userAgent?: string;
+    }) => {
+      const row: AuthSession = {
+        id: `session-${this.authSessionRows.size + 1}`,
+        createdAt: new Date("2026-08-23T00:00:00.000Z"),
+        lastUsedAt: null,
+        revokedAt: null,
+        ...input
+      };
+      this.authSessionRows.set(row.id, row);
+      return row;
+    },
+    findById: async (id: string) => this.authSessionRows.get(id) ?? null,
+    save: async (session: AuthSession) => {
+      this.authSessionRows.set(session.id, session);
+      return session;
+    }
   };
   garments = {
     create: async (input: Pick<Garment, "userId" | "category" | "primaryColor" | "status" | "name">) => {
@@ -103,6 +145,8 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
 
   householdRows = new Map<string, Household>();
   userRows = new Map<string, ClosetUser>();
+  userCredentialRows = new Map<string, UserCredential>();
+  authSessionRows = new Map<string, AuthSession>();
   garmentRows = new Map<string, Garment>();
   outfitRows = new Map<string, Outfit>();
   usageEventRows = new Map<string, GarmentUsageEvent>();

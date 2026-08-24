@@ -19,10 +19,6 @@ export class CreateUserDto {
 }
 
 export class CreateGarmentDto {
-  @ApiProperty()
-  @IsString()
-  userId!: string;
-
   @ApiProperty({ enum: GarmentCategory })
   @IsEnum(GarmentCategory)
   category!: GarmentCategory;
@@ -42,23 +38,7 @@ export class CreateGarmentDto {
   name?: string;
 }
 
-export class GenerateBasicOutfitDto {
-  @ApiProperty()
-  @IsString()
-  userId!: string;
-}
-
-export class UserScopedCommandDto {
-  @ApiProperty()
-  @IsString()
-  userId!: string;
-}
-
 export class ConfirmOutfitUsageDto {
-  @ApiProperty()
-  @IsString()
-  userId!: string;
-
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
