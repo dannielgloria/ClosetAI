@@ -7,22 +7,8 @@ import {
   buildContextInterpreterInstructions,
   CONTEXT_INTERPRETER_PROMPT_VERSION
 } from "../../../../prompts/context-interpreter/v1.js";
-import { AiConfig, getAiConfig } from "./ai-config.js";
-
-interface OpenAIResponseResult {
-  output_text?: string;
-  status?: string;
-  usage?: unknown;
-}
-
-export const OPENAI_RESPONSES_CLIENT = Symbol("OPENAI_RESPONSES_CLIENT");
-export const AI_CONFIG = Symbol("AI_CONFIG");
-
-interface OpenAIResponsesClient {
-  responses: {
-    create(params: ResponseCreateParamsNonStreaming, options?: { timeout?: number }): Promise<OpenAIResponseResult>;
-  };
-}
+import { AiConfig } from "../ai/ai-config.js";
+import { AI_CONFIG, OpenAIResponsesClient, OPENAI_RESPONSES_CLIENT } from "../ai/openai-responses-client.js";
 
 @Injectable()
 export class OpenAIContextInterpreterAdapter implements ContextInterpreterPort {

@@ -6,6 +6,7 @@ import {
   GarmentUsageEvent,
   Household,
   Outfit,
+  OutfitStatus,
   UserCredential
 } from "@closet-ai/domain";
 
@@ -66,6 +67,7 @@ export interface OutfitRepositoryPort {
     garmentIds: EntityId[];
     explanation: string;
     score: number;
+    status?: OutfitStatus;
   }): Promise<Outfit>;
   findById(id: EntityId): Promise<Outfit | null>;
   save(outfit: Outfit): Promise<Outfit>;

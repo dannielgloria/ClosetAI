@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsArray, IsEnum, IsObject, IsOptional, IsString } from "class-validator";
-import { GarmentCategory, GarmentStatus } from "@closet-ai/domain";
+import { Type } from "class-transformer";
+import { IsArray, IsEnum, IsObject, IsOptional, IsString, ValidateNested } from "class-validator";
+import { ActivityType, GarmentCategory, GarmentStatus } from "@closet-ai/domain";
 
 export class CreateHouseholdDto {
   @ApiProperty()
@@ -49,6 +50,33 @@ export class ConfirmOutfitUsageDto {
   @IsOptional()
   @IsObject()
   context?: Record<string, unknown>;
+}
+
+export class ActivityContextDto {
+  @ApiProperty({ enum: ActivityType })
+  @IsEnum(ActivityType)
+  type!: ActivityType;
+
+  @ApiProperty({ nullable: true, example: "20:00" })
+  @IsOptional()
+  @IsString()
+  time!: string | null;
+}
+
+export class InterpretedContextDto {
+  @ApiProperty({ type: [ActivityContextDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ActivityContextDto)
+  activities!: ActivityContextDto[];
+}
+
+export class GenerateOutfitRecommendationsDto {
+  @ApiPropertyOptional({ type: InterpretedContextDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => InterpretedContextDto)
+  context?: InterpretedContextDto;
 }
 
 export class HouseholdResponseDto {
@@ -182,4 +210,12 @@ export class ConfirmOutfitUsageResponseDto {
 
   @ApiProperty({ type: [GarmentUsageEventResponseDto] })
   usageEvents!: GarmentUsageEventResponseDto[];
+}
+
+export class GenerateOutfitRecommendationsResponseDto {
+  @ApiProperty({ enum: ["AI", "DETERMINISTIC_FALLBACK"] })
+  strategy!: string;
+
+  @ApiProperty({ type: [OutfitResponseDto] })
+  recommendations!: OutfitResponseDto[];
 }

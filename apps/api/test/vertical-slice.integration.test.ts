@@ -5,7 +5,7 @@ import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { Algorithm, hash } from "@node-rs/argon2";
 import { PrismaClient } from "@prisma/client";
-import { ContextInterpreterPort } from "@closet-ai/application";
+import { ContextInterpreterPort, OutfitStylistFailedError, OutfitStylistPort, OutfitStylistRecommendationCandidate } from "@closet-ai/application";
 import { ActivityType, InterpretedContext } from "@closet-ai/domain";
 import request from "supertest";
 import { GenericContainer, StartedTestContainer, Wait } from "testcontainers";
@@ -13,6 +13,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module.js";
 import { configureHttpHardening } from "../src/config/http-hardening.js";
 import { CONTEXT_INTERPRETER } from "../src/context/context-interpreter.provider.js";
+import { OUTFIT_STYLIST } from "../src/outfit-stylist/outfit-stylist.provider.js";
 
 interface HouseholdResponse {
   household: { id: string; name: string };
@@ -53,6 +54,11 @@ interface ConfirmUsageResponse {
   usageEvents: { id: string; garmentId: string; outfitId: string; wornAt: string }[];
 }
 
+interface OutfitRecommendationsResponse {
+  strategy: "AI" | "DETERMINISTIC_FALLBACK";
+  recommendations: OutfitResponse[];
+}
+
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 describe("MVP vertical slice with authentication and PostgreSQL", () => {
@@ -61,6 +67,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
   let app: INestApplication;
   let prisma: PrismaClient;
   let contextInterpreterResult: InterpretedContext | Error;
+  let outfitStylistResult: OutfitStylistRecommendationCandidate[] | OutfitStylistFailedError;
 
   beforeAll(async () => {
     container = await new GenericContainer("postgres:16-alpine")
@@ -115,6 +122,16 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
           return contextInterpreterResult;
         }
       } satisfies ContextInterpreterPort)
+      .overrideProvider(OUTFIT_STYLIST)
+      .useValue({
+        recommend: async () => {
+          if (outfitStylistResult instanceof OutfitStylistFailedError) {
+            throw outfitStylistResult;
+          }
+
+          return outfitStylistResult;
+        }
+      } satisfies OutfitStylistPort)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -137,6 +154,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     process.env.AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS = "60";
     process.env.AUTH_REFRESH_RATE_LIMIT_WINDOW_SECONDS = "60";
     contextInterpreterResult = { activities: [{ type: ActivityType.GYM, time: "17:00" }] };
+    outfitStylistResult = [];
     await prisma.garmentUsageEvent.deleteMany();
     await prisma.outfitItem.deleteMany();
     await prisma.outfit.deleteMany();
@@ -371,7 +389,11 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       .set(authHeader(auth.accessToken))
       .send({})
       .expect(201)
-      .then((response) => response.body as OutfitResponse);
+      .then((response) => {
+        const body = response.body as OutfitRecommendationsResponse;
+        expect(body.strategy).toBe("DETERMINISTIC_FALLBACK");
+        return body.recommendations[0]!;
+      });
 
     expect(outfit.items.map((item) => item.garmentId).sort()).toEqual([bottom.id, footwear.id, top.id].sort());
 
@@ -443,7 +465,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       .set(authHeader(userBAuth.accessToken))
       .send({})
       .expect(201)
-      .then((response) => response.body as OutfitResponse);
+      .then((response) => (response.body as OutfitRecommendationsResponse).recommendations[0]!);
 
     await request(app.getHttpServer()).post(`/api/v1/outfits/${outfitB.id}/select`).set(authHeader(userA.accessToken)).send({}).expect(404);
     await request(app.getHttpServer())
@@ -476,7 +498,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       .set(authHeader(auth.accessToken))
       .send({})
       .expect(201)
-      .then((response) => response.body as OutfitResponse);
+      .then((response) => (response.body as OutfitRecommendationsResponse).recommendations[0]!);
 
     await request(app.getHttpServer())
       .post(`/api/v1/outfits/${outfit.id}/confirm-usage`)
@@ -538,6 +560,72 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       .set(authHeader(auth.accessToken))
       .send({ text: "Hoy voy al gimnasio." })
       .expect(503);
+  });
+
+  it("generates AI-ranked outfit recommendations from structured context and persists outfits", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const top = await createGarment(auth.accessToken, "TOP", "black", "CLEAN_AVAILABLE", "Black tee");
+    const bottom = await createGarment(auth.accessToken, "BOTTOM", "indigo", "CLEAN_AVAILABLE", "Jeans");
+    const footwear = await createGarment(auth.accessToken, "FOOTWEAR", "white", "CLEAN_AVAILABLE", "Sneakers");
+    outfitStylistResult = [{ garmentIds: [top.id, bottom.id, footwear.id], score: 91, reason: "Good for a casual dinner." }];
+
+    const result = await request(app.getHttpServer())
+      .post("/api/v1/outfit-recommendations")
+      .set(authHeader(auth.accessToken))
+      .send({ context: { activities: [{ type: "CASUAL_DINNER", time: "20:00" }] } })
+      .expect(201)
+      .then((response) => response.body as OutfitRecommendationsResponse);
+
+    expect(result.strategy).toBe("AI");
+    expect(result.recommendations).toHaveLength(1);
+    expect(result.recommendations[0]).toMatchObject({ status: "PRESENTED", score: 91 });
+    await expect(prisma.outfit.count({ where: { id: result.recommendations[0]!.id } })).resolves.toBe(1);
+
+    await request(app.getHttpServer()).post(`/api/v1/outfits/${result.recommendations[0]!.id}/select`).set(authHeader(auth.accessToken)).send({}).expect(200);
+    await request(app.getHttpServer())
+      .post(`/api/v1/outfits/${result.recommendations[0]!.id}/confirm-usage`)
+      .set(authHeader(auth.accessToken))
+      .send({ context: { activity: "CASUAL_DINNER" } })
+      .expect(200);
+  });
+
+  it("rejects AI recommendations with invalid garment IDs", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    await createGarment(auth.accessToken, "TOP", "black");
+    await createGarment(auth.accessToken, "BOTTOM", "indigo");
+    await createGarment(auth.accessToken, "FOOTWEAR", "white");
+    outfitStylistResult = [{ garmentIds: ["00000000-0000-0000-0000-000000000000"], score: 80, reason: "Invalid." }];
+
+    await request(app.getHttpServer())
+      .post("/api/v1/outfit-recommendations")
+      .set(authHeader(auth.accessToken))
+      .send({ context: { activities: [{ type: "CASUAL_DINNER", time: "20:00" }] } })
+      .expect(400);
+  });
+
+  it("falls back deterministically when the AI stylist fails", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    await createGarment(auth.accessToken, "TOP", "black");
+    await createGarment(auth.accessToken, "BOTTOM", "indigo");
+    await createGarment(auth.accessToken, "FOOTWEAR", "white");
+    outfitStylistResult = new OutfitStylistFailedError();
+
+    const result = await request(app.getHttpServer())
+      .post("/api/v1/outfit-recommendations")
+      .set(authHeader(auth.accessToken))
+      .send({ context: { activities: [{ type: "CASUAL_DINNER", time: "20:00" }] } })
+      .expect(201)
+      .then((response) => response.body as OutfitRecommendationsResponse);
+
+    expect(result.strategy).toBe("DETERMINISTIC_FALLBACK");
+    expect(result.recommendations[0]?.items).toHaveLength(3);
+  });
+
+  it("rejects unauthenticated outfit recommendations before invoking AI", async () => {
+    await request(app.getHttpServer())
+      .post("/api/v1/outfit-recommendations")
+      .send({ context: { activities: [{ type: "CASUAL_DINNER", time: "20:00" }] } })
+      .expect(401);
   });
 
   async function createHousehold(name: string, initialUserDisplayName: string): Promise<HouseholdResponse> {

@@ -1,4 +1,6 @@
 import '../domain/garment.dart';
+import '../domain/interpreted_context.dart';
+import '../domain/outfit_recommendation.dart';
 import 'closet_api_client.dart';
 
 abstract interface class WardrobeRepository {
@@ -10,6 +12,12 @@ abstract interface class WardrobeRepository {
     required String status,
     String? name,
   });
+
+  Future<OutfitRecommendationsResult> generateOutfitRecommendations({
+    InterpretedContext? context,
+  });
+
+  Future<OutfitRecommendation> selectOutfit(String outfitId);
 }
 
 class ApiWardrobeRepository implements WardrobeRepository {
@@ -42,5 +50,24 @@ class ApiWardrobeRepository implements WardrobeRepository {
     );
 
     return Garment.fromJson(row);
+  }
+
+  @override
+  Future<OutfitRecommendationsResult> generateOutfitRecommendations({
+    InterpretedContext? context,
+  }) async {
+    final row = await _apiClient.postObject(
+      '/outfit-recommendations',
+      body: {if (context != null) 'context': context.toJson()},
+    );
+
+    return OutfitRecommendationsResult.fromJson(row);
+  }
+
+  @override
+  Future<OutfitRecommendation> selectOutfit(String outfitId) async {
+    final row = await _apiClient.postObject('/outfits/$outfitId/select');
+
+    return OutfitRecommendation.fromJson(row);
   }
 }

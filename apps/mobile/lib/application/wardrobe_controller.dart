@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 
 import '../data/wardrobe_repository.dart';
 import '../domain/garment.dart';
+import '../domain/interpreted_context.dart';
+import '../domain/outfit_recommendation.dart';
 
 class WardrobeController extends ChangeNotifier {
   WardrobeController(this._repository);
@@ -11,6 +13,8 @@ class WardrobeController extends ChangeNotifier {
   bool isLoading = false;
   String? errorMessage;
   List<Garment> garments = const [];
+  String? recommendationStrategy;
+  List<OutfitRecommendation> recommendations = const [];
 
   Future<void> loadGarments() async {
     await _run(() async {
@@ -32,6 +36,30 @@ class WardrobeController extends ChangeNotifier {
         name: name,
       );
       garments = await _repository.listGarments();
+    });
+  }
+
+  Future<void> generateOutfitRecommendations({
+    InterpretedContext? context,
+  }) async {
+    await _run(() async {
+      final result = await _repository.generateOutfitRecommendations(
+        context: context,
+      );
+      recommendationStrategy = result.strategy;
+      recommendations = result.recommendations;
+    });
+  }
+
+  Future<void> selectOutfit(String outfitId) async {
+    await _run(() async {
+      final selected = await _repository.selectOutfit(outfitId);
+      recommendations = recommendations
+          .map(
+            (recommendation) =>
+                recommendation.id == selected.id ? selected : recommendation,
+          )
+          .toList(growable: false);
     });
   }
 

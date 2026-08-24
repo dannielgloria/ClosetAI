@@ -5,6 +5,7 @@ import 'package:closet_ai_mobile/data/wardrobe_repository.dart';
 import 'package:closet_ai_mobile/domain/auth_user.dart';
 import 'package:closet_ai_mobile/domain/garment.dart';
 import 'package:closet_ai_mobile/domain/interpreted_context.dart';
+import 'package:closet_ai_mobile/domain/outfit_recommendation.dart';
 import 'package:closet_ai_mobile/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -59,6 +60,32 @@ void main() {
 
     expect(find.text('GYM'), findsOneWidget);
     expect(find.text('17:00'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Generar outfits'),
+      500,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Generar outfits'));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('LOOK 91/100'),
+      500,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(find.text('LOOK 91/100'), findsOneWidget);
+    expect(find.textContaining('Ready for dinner'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Usar este outfit'),
+      500,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Usar este outfit'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Selected'), findsOneWidget);
   });
 }
 
@@ -102,6 +129,43 @@ class FakeWardrobeRepository implements WardrobeRepository {
   @override
   Future<List<Garment>> listGarments() async {
     return _garments.toList(growable: false);
+  }
+
+  @override
+  Future<OutfitRecommendationsResult> generateOutfitRecommendations({
+    InterpretedContext? context,
+  }) async {
+    return const OutfitRecommendationsResult(
+      strategy: 'AI',
+      recommendations: [
+        OutfitRecommendation(
+          id: 'outfit-1',
+          userId: 'user-1',
+          status: 'PRESENTED',
+          items: [
+            OutfitItem(garmentId: 'garment-1', position: 0),
+            OutfitItem(garmentId: 'garment-2', position: 1),
+          ],
+          explanation: 'Ready for dinner.',
+          score: 91,
+        ),
+      ],
+    );
+  }
+
+  @override
+  Future<OutfitRecommendation> selectOutfit(String outfitId) async {
+    return const OutfitRecommendation(
+      id: 'outfit-1',
+      userId: 'user-1',
+      status: 'SELECTED',
+      items: [
+        OutfitItem(garmentId: 'garment-1', position: 0),
+        OutfitItem(garmentId: 'garment-2', position: 1),
+      ],
+      explanation: 'Ready for dinner.',
+      score: 91,
+    );
   }
 }
 

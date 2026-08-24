@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, HttpCode, Inject, Param, Post, UseGuards } from "@nestjs/common";
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -12,13 +12,14 @@ import {
 import {
   AuthenticatedUser,
   ConfirmOutfitUsageUseCase,
-  GenerateBasicOutfitUseCase,
+  GenerateOutfitRecommendationsUseCase,
   SelectOutfitUseCase
 } from "@closet-ai/application";
 import { CurrentUser } from "../auth/current-user.decorator.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import { ApplicationPortFactory } from "../prisma/application-port-factory.js";
-import { ConfirmOutfitUsageDto, ConfirmOutfitUsageResponseDto, OutfitResponseDto } from "./dtos.js";
+import { OUTFIT_STYLIST, OutfitStylistProvider } from "../outfit-stylist/outfit-stylist.provider.js";
+import { ConfirmOutfitUsageDto, ConfirmOutfitUsageResponseDto, GenerateOutfitRecommendationsDto, GenerateOutfitRecommendationsResponseDto, OutfitResponseDto } from "./dtos.js";
 import { mapUseCaseError } from "./http-errors.js";
 
 @ApiTags("outfits")
@@ -26,16 +27,25 @@ import { mapUseCaseError } from "./http-errors.js";
 @UseGuards(JwtAuthGuard)
 @Controller()
 export class OutfitsController {
-  constructor(private readonly portFactory: ApplicationPortFactory) {}
+  constructor(
+    private readonly portFactory: ApplicationPortFactory,
+    @Inject(OUTFIT_STYLIST) private readonly outfitStylist: OutfitStylistProvider
+  ) {}
 
   @Post("outfit-recommendations")
-  @ApiOperation({ summary: "Generate a basic deterministic outfit without AI." })
-  @ApiCreatedResponse({ type: OutfitResponseDto })
-  @ApiBadRequestResponse({ description: "Not enough eligible garments or invalid user." })
+  @ApiOperation({ summary: "Generate context-aware outfit recommendations from eligible garments." })
+  @ApiCreatedResponse({ type: GenerateOutfitRecommendationsResponseDto })
+  @ApiBadRequestResponse({ description: "Invalid context, insufficient eligible garments, or invalid AI recommendation." })
   @ApiUnauthorizedResponse({ description: "Missing, invalid, or revoked access token." })
-  async generateBasicOutfit(@CurrentUser() currentUser: AuthenticatedUser) {
+  async generateOutfitRecommendations(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Body() body: GenerateOutfitRecommendationsDto
+  ): Promise<GenerateOutfitRecommendationsResponseDto> {
     try {
-      return await new GenerateBasicOutfitUseCase(this.portFactory.create()).execute({ userId: currentUser.userId });
+      return await new GenerateOutfitRecommendationsUseCase(this.portFactory.create(), this.outfitStylist).execute({
+        userId: currentUser.userId,
+        context: body.context
+      });
     } catch (error) {
       mapUseCaseError(error);
     }

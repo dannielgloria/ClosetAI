@@ -1,4 +1,14 @@
-const INSECURE_PRODUCTION_VALUES = new Set(["", "secret123", "changeme", "development-secret", "dev-only-change-me"]);
+const INSECURE_PRODUCTION_VALUES = new Set([
+  "",
+  "secret123",
+  "changeme",
+  "development-secret",
+  "dev-only-change-me",
+  "replace-with-openai-api-key-when-enabled",
+  "replace-with-openai-context-model",
+  "replace-with-openai-outfit-model",
+  "replace-when-ai-is-enabled"
+]);
 
 export interface RuntimeConfig {
   environment: "local" | "production" | "test";
@@ -28,7 +38,8 @@ export function validateProductionConfig(): void {
     "JWT_REFRESH_SECRET",
     "SETUP_SECRET",
     "OPENAI_API_KEY",
-    "AI_CONTEXT_MODEL"
+    "AI_CONTEXT_MODEL",
+    "AI_OUTFIT_MODEL"
   ];
   const missingOrInsecure = required.filter((name) => {
     const value = process.env[name]?.trim() ?? "";

@@ -379,6 +379,44 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
                   title: Text(activity.type),
                   subtitle: Text(activity.time ?? 'Sin hora'),
                 ),
+              FilledButton.icon(
+                onPressed: _controller.isLoading
+                    ? null
+                    : _generateOutfitRecommendations,
+                icon: const Icon(Icons.checkroom),
+                label: const Text('Generar outfits'),
+              ),
+            ],
+            if (_controller.recommendations.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              Text(
+                'Outfits',
+                style: textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text('Strategy: ${_controller.recommendationStrategy}'),
+              const SizedBox(height: 8),
+              for (final recommendation in _controller.recommendations)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.style_outlined),
+                  title: Text('LOOK ${recommendation.score}/100'),
+                  subtitle: Text(
+                    '${recommendation.items.map((item) => _garmentLabel(item.garmentId)).join('\n')}\n\n${recommendation.explanation}',
+                  ),
+                  trailing: TextButton(
+                    onPressed: recommendation.status == 'SELECTED'
+                        ? null
+                        : () => _controller.selectOutfit(recommendation.id),
+                    child: Text(
+                      recommendation.status == 'SELECTED'
+                          ? 'Selected'
+                          : 'Usar este outfit',
+                    ),
+                  ),
+                ),
             ],
           ],
         ),
@@ -392,6 +430,30 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
 
   Future<void> _interpretContext() {
     return _contextController.interpret(_contextTextController.text);
+  }
+
+  Future<void> _generateOutfitRecommendations() {
+    return _controller.generateOutfitRecommendations(
+      context: _contextController.interpretedContext,
+    );
+  }
+
+  String _garmentLabel(String garmentId) {
+    Garment? garment;
+    for (final candidate in _controller.garments) {
+      if (candidate.id == garmentId) {
+        garment = candidate;
+        break;
+      }
+    }
+
+    if (garment == null) {
+      return garmentId;
+    }
+
+    return garment.name?.trim().isNotEmpty == true
+        ? garment.name!
+        : '${garment.primaryColor} ${garment.category.toLowerCase()}';
   }
 
   Future<void> _showCreateGarmentDialog() async {

@@ -28,6 +28,8 @@ For natural-language context interpretation:
 - do not call OpenAI from controllers, domain code, or Prisma repositories;
 - do not include real OpenAI calls in normal unit or integration test suites.
 
+For outfit styling, OpenAI may rank and compose outfits only from backend-supplied eligible garment candidates. The application must validate every returned garment ID and persist only valid recommendations.
+
 ## Alternatives Considered
 
 - A generic `AIService.generate(prompt)` abstraction.

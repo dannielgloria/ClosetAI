@@ -10,6 +10,10 @@ class ActivityContext {
 
   final String type;
   final String? time;
+
+  Map<String, Object?> toJson() {
+    return {'type': type, 'time': time};
+  }
 }
 
 class InterpretedContext {
@@ -30,4 +34,10 @@ class InterpretedContext {
   }
 
   final List<ActivityContext> activities;
+
+  Map<String, Object?> toJson() {
+    return {
+      'activities': activities.map((activity) => activity.toJson()).toList(),
+    };
+  }
 }

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  ActivityType,
+  AuthSession,
   ClosetUser,
   Garment,
   GarmentCategory,
@@ -8,10 +10,17 @@ import {
   Household,
   Outfit,
   OutfitStatus,
-  UserCredential,
-  AuthSession
+  UserCredential
 } from "@closet-ai/domain";
 import { ApplicationPorts, UnitOfWorkPort } from "./ports.js";
+import {
+  GenerateOutfitRecommendationsUseCase,
+  OutfitRecommendationStrategy,
+  OutfitStylistFailedError,
+  OutfitStylistGarmentCandidate,
+  OutfitStylistPort,
+  OutfitStylistRecommendationCandidate
+} from "./outfit-stylist.js";
 import {
   ConfirmOutfitUsageUseCase,
   CreateGarmentUseCase,
@@ -103,12 +112,12 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
     }
   };
   outfits = {
-    create: async (input: { userId: string; garmentIds: string[]; explanation: string; score: number }) => {
+    create: async (input: { userId: string; garmentIds: string[]; explanation: string; score: number; status?: OutfitStatus }) => {
       const now = new Date("2026-08-23T00:00:00.000Z");
       const row: Outfit = {
         id: `outfit-${this.outfitRows.size + 1}`,
         userId: input.userId,
-        status: OutfitStatus.GENERATED,
+        status: input.status ?? OutfitStatus.GENERATED,
         items: input.garmentIds.map((garmentId, position) => ({ garmentId, position })),
         explanation: input.explanation,
         score: input.score,
@@ -228,4 +237,140 @@ describe("MVP use cases", () => {
     expect(ports.garmentRows.get(top.id)?.wearCount).toBe(1);
     expect(ports.garmentRows.get(bottom.id)?.wearCount).toBe(0);
   });
+
+  it("sends only eligible current-user garments to the AI stylist", async () => {
+    const top = await ports.garments.create({ userId: "user-1", category: GarmentCategory.TOP, primaryColor: "black", status: GarmentStatus.CLEAN_AVAILABLE });
+    const bottom = await ports.garments.create({ userId: "user-1", category: GarmentCategory.BOTTOM, primaryColor: "blue", status: GarmentStatus.WORN_REUSABLE });
+    const footwear = await ports.garments.create({ userId: "user-1", category: GarmentCategory.FOOTWEAR, primaryColor: "white", status: GarmentStatus.CLEAN_AVAILABLE });
+    await ports.garments.create({ userId: "user-1", category: GarmentCategory.TOP, primaryColor: "red", status: GarmentStatus.LAUNDRY_BIN });
+    await ports.garments.create({ userId: "user-2", category: GarmentCategory.TOP, primaryColor: "green", status: GarmentStatus.CLEAN_AVAILABLE });
+    const stylist = new FakeOutfitStylist([{ garmentIds: [top.id, bottom.id, footwear.id], score: 91, reason: "Fits the context." }]);
+
+    await new GenerateOutfitRecommendationsUseCase(ports, stylist).execute({
+      userId: "user-1",
+      context: { activities: [{ type: ActivityType.CASUAL_DINNER, time: "20:00" }] }
+    });
+
+    expect(stylist.lastInput?.garments.map((garment) => garment.id).sort()).toEqual([bottom.id, footwear.id, top.id].sort());
+  });
+
+  it("persists valid AI recommendations as presented outfits", async () => {
+    const top = await ports.garments.create({ userId: "user-1", category: GarmentCategory.TOP, primaryColor: "black", status: GarmentStatus.CLEAN_AVAILABLE });
+    const bottom = await ports.garments.create({ userId: "user-1", category: GarmentCategory.BOTTOM, primaryColor: "blue", status: GarmentStatus.CLEAN_AVAILABLE });
+    const footwear = await ports.garments.create({ userId: "user-1", category: GarmentCategory.FOOTWEAR, primaryColor: "white", status: GarmentStatus.CLEAN_AVAILABLE });
+
+    const result = await new GenerateOutfitRecommendationsUseCase(
+      ports,
+      new FakeOutfitStylist([{ garmentIds: [top.id, bottom.id, footwear.id], score: 87, reason: "Good for dinner." }])
+    ).execute({ userId: "user-1", context: { activities: [{ type: ActivityType.CASUAL_DINNER, time: "20:00" }] } });
+
+    expect(result.strategy).toBe(OutfitRecommendationStrategy.AI);
+    expect(result.recommendations).toHaveLength(1);
+    expect(result.recommendations[0]).toMatchObject({
+      status: OutfitStatus.PRESENTED,
+      score: 87,
+      explanation: "Good for dinner."
+    });
+  });
+
+  it("rejects invalid AI garment IDs", async () => {
+    await createBasicEligibleGarments(ports);
+
+    await expect(
+      new GenerateOutfitRecommendationsUseCase(
+        ports,
+        new FakeOutfitStylist([{ garmentIds: ["missing", "garment-1", "garment-2"], score: 80, reason: "Bad ID." }])
+      ).execute({ userId: "user-1", context: { activities: [{ type: ActivityType.CASUAL_DINNER, time: "20:00" }] } })
+    ).rejects.toThrow("Recommendation references an ineligible garment.");
+  });
+
+  it("rejects duplicate garment IDs", async () => {
+    const { top, bottom } = await createBasicEligibleGarments(ports);
+
+    await expect(
+      new GenerateOutfitRecommendationsUseCase(
+        ports,
+        new FakeOutfitStylist([{ garmentIds: [top.id, top.id, bottom.id], score: 80, reason: "Duplicate." }])
+      ).execute({ userId: "user-1", context: { activities: [{ type: ActivityType.CASUAL_DINNER, time: "20:00" }] } })
+    ).rejects.toThrow("Recommendation contains duplicate garment IDs.");
+  });
+
+  it("rejects scores outside the allowed range", async () => {
+    const { top, bottom, footwear } = await createBasicEligibleGarments(ports);
+
+    await expect(
+      new GenerateOutfitRecommendationsUseCase(
+        ports,
+        new FakeOutfitStylist([{ garmentIds: [top.id, bottom.id, footwear.id], score: 101, reason: "Too high." }])
+      ).execute({ userId: "user-1", context: { activities: [{ type: ActivityType.CASUAL_DINNER, time: "20:00" }] } })
+    ).rejects.toThrow("Invalid recommendation score.");
+  });
+
+  it("rejects more than three AI recommendations", async () => {
+    const { top, bottom, footwear } = await createBasicEligibleGarments(ports);
+    const recommendation = { garmentIds: [top.id, bottom.id, footwear.id], score: 80, reason: "Valid." };
+
+    await expect(
+      new GenerateOutfitRecommendationsUseCase(
+        ports,
+        new FakeOutfitStylist([recommendation, recommendation, recommendation, recommendation])
+      ).execute({ userId: "user-1", context: { activities: [{ type: ActivityType.CASUAL_DINNER, time: "20:00" }] } })
+    ).rejects.toThrow("Invalid recommendation count.");
+  });
+
+  it("avoids AI when there are not enough eligible garments", async () => {
+    await ports.garments.create({ userId: "user-1", category: GarmentCategory.TOP, primaryColor: "black", status: GarmentStatus.CLEAN_AVAILABLE });
+    const stylist = new FakeOutfitStylist([]);
+
+    await expect(
+      new GenerateOutfitRecommendationsUseCase(ports, stylist).execute({
+        userId: "user-1",
+        context: { activities: [{ type: ActivityType.CASUAL_DINNER, time: "20:00" }] }
+      })
+    ).rejects.toThrow("Not enough eligible garments to generate a basic outfit.");
+    expect(stylist.lastInput).toBeNull();
+  });
+
+  it("falls back to the deterministic engine when AI fails", async () => {
+    const { top, bottom, footwear } = await createBasicEligibleGarments(ports);
+
+    const result = await new GenerateOutfitRecommendationsUseCase(ports, new FakeOutfitStylist(new OutfitStylistFailedError())).execute({
+      userId: "user-1",
+      context: { activities: [{ type: ActivityType.CASUAL_DINNER, time: "20:00" }] }
+    });
+
+    expect(result.strategy).toBe(OutfitRecommendationStrategy.DETERMINISTIC_FALLBACK);
+    expect(result.recommendations[0]?.items.map((item) => item.garmentId).sort()).toEqual([bottom.id, footwear.id, top.id].sort());
+  });
+
+  it("keeps deterministic fallback available without context", async () => {
+    await createBasicEligibleGarments(ports);
+
+    const result = await new GenerateOutfitRecommendationsUseCase(ports, new FakeOutfitStylist([])).execute({ userId: "user-1" });
+
+    expect(result.strategy).toBe(OutfitRecommendationStrategy.DETERMINISTIC_FALLBACK);
+    expect(result.recommendations[0]?.status).toBe(OutfitStatus.PRESENTED);
+  });
 });
+
+class FakeOutfitStylist implements OutfitStylistPort {
+  lastInput: { garments: OutfitStylistGarmentCandidate[]; maxRecommendations: number } | null = null;
+
+  constructor(private readonly result: OutfitStylistRecommendationCandidate[] | OutfitStylistFailedError) {}
+
+  async recommend(input: { garments: OutfitStylistGarmentCandidate[]; maxRecommendations: number }): Promise<OutfitStylistRecommendationCandidate[]> {
+    this.lastInput = input;
+    if (this.result instanceof OutfitStylistFailedError) {
+      throw this.result;
+    }
+
+    return this.result;
+  }
+}
+
+async function createBasicEligibleGarments(ports: InMemoryPorts) {
+  const top = await ports.garments.create({ userId: "user-1", category: GarmentCategory.TOP, primaryColor: "black", status: GarmentStatus.CLEAN_AVAILABLE });
+  const bottom = await ports.garments.create({ userId: "user-1", category: GarmentCategory.BOTTOM, primaryColor: "blue", status: GarmentStatus.CLEAN_AVAILABLE });
+  const footwear = await ports.garments.create({ userId: "user-1", category: GarmentCategory.FOOTWEAR, primaryColor: "white", status: GarmentStatus.CLEAN_AVAILABLE });
+  return { top, bottom, footwear };
+}

@@ -247,3 +247,83 @@ POST /api/v1/outfit-recommendations
 POST /api/v1/outfits/{outfitId}/select
 POST /api/v1/outfits/{outfitId}/confirm-usage
 ```
+
+### Generate Outfit Recommendations
+
+```text
+POST /api/v1/outfit-recommendations
+```
+
+Requires Bearer auth. Generates up to three outfit recommendations from the
+authenticated user's eligible garments. When structured context is supplied, the
+backend filters candidates deterministically before asking the OpenAI outfit
+stylist to rank/compose recommendations. OpenAI may only return garment IDs from
+the candidate set. The backend validates IDs, ownership, availability,
+duplicates, score range, and minimum category requirements before persistence.
+
+If the AI stylist is unavailable or returns malformed output, the backend falls
+back to the deterministic basic outfit engine when enough eligible garments
+exist.
+
+Request with context:
+
+```json
+{
+  "context": {
+    "activities": [
+      {
+        "type": "CASUAL_DINNER",
+        "time": "20:00"
+      }
+    ]
+  }
+}
+```
+
+Request without context:
+
+```json
+{}
+```
+
+Response:
+
+```json
+{
+  "strategy": "AI",
+  "recommendations": [
+    {
+      "id": "uuid",
+      "userId": "uuid",
+      "status": "PRESENTED",
+      "items": [
+        {
+          "garmentId": "uuid",
+          "position": 0
+        }
+      ],
+      "explanation": "Suitable for a casual dinner.",
+      "score": 91,
+      "selectedAt": null,
+      "wornAt": null,
+      "createdAt": "2026-08-24T00:00:00.000Z",
+      "updatedAt": "2026-08-24T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+Strategies:
+
+```text
+AI
+DETERMINISTIC_FALLBACK
+```
+
+Responses:
+
+```text
+201 recommendations persisted
+400 invalid context, insufficient garments, or invalid AI recommendation
+401 missing, invalid, expired, or revoked access token
+```

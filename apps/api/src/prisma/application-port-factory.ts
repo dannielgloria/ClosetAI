@@ -11,7 +11,7 @@ import {
   UserCredentialRepositoryPort,
   UserRepositoryPort
 } from "@closet-ai/application";
-import { GarmentStatus } from "@closet-ai/domain";
+import { GarmentStatus, OutfitStatus } from "@closet-ai/domain";
 import { PrismaService } from "./prisma.service.js";
 import { mapAuthSession, mapGarment, mapHousehold, mapOutfit, mapUsageEvent, mapUser, mapUserCredential } from "./mappers.js";
 
@@ -197,6 +197,7 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
           await db.outfit.create({
             data: {
               userId: input.userId,
+              status: input.status ?? OutfitStatus.GENERATED,
               explanation: input.explanation,
               score: input.score,
               items: {
