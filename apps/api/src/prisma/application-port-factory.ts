@@ -282,7 +282,34 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
             where: { id: input.imageId },
             data: { garmentId: input.garmentId }
           })
-        )
+        ),
+      updateThumbnailObjectKey: async (input) =>
+        mapGarmentImage(
+          await db.garmentImage.update({
+            where: { id: input.imageId },
+            data: { thumbnailObjectKey: input.thumbnailObjectKey }
+          })
+        ),
+      findOrphanedBefore: async (input) =>
+        (
+          await db.garmentImage.findMany({
+            where: {
+              garmentId: null,
+              createdAt: { lt: input.olderThan }
+            },
+            orderBy: { createdAt: "asc" },
+            take: input.limit
+          })
+        ).map(mapGarmentImage),
+      deleteOrphanById: async (imageId) => {
+        const result = await db.garmentImage.deleteMany({
+          where: {
+            id: imageId,
+            garmentId: null
+          }
+        });
+        return result.count > 0;
+      }
     };
   }
 

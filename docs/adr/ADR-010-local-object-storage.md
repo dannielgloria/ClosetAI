@@ -22,9 +22,26 @@ Garment images are stored under private object keys shaped like:
 users/{userId}/garment-images/{objectId}.{ext}
 ```
 
-PostgreSQL stores `GarmentImage.objectKey`, ownership, MIME type, size, and the
-optional garment association. Images are served only through authenticated
-NestJS endpoints after application-layer ownership validation.
+Thumbnail derivatives are stored under private object keys shaped like:
+
+```text
+users/{userId}/garment-images/{imageId}/thumbnail.webp
+```
+
+Thumbnails are derived, regenerable artifacts. The first MVP derivative is a
+single WebP thumbnail with a maximum side of 512 px. The original remains the
+authoritative uploaded image.
+
+PostgreSQL stores `GarmentImage.objectKey`, `GarmentImage.thumbnailObjectKey`,
+ownership, MIME type, size, and the optional garment association. Images are
+served only through authenticated NestJS endpoints after application-layer
+ownership validation.
+
+Orphan cleanup is handled by the BullMQ worker. A `GarmentImage` is eligible for
+cleanup when `garmentId IS NULL` and it is older than the configured grace
+period. Cleanup deletes object-storage files first; only after object deletion
+succeeds or the objects are already absent does the worker delete the PostgreSQL
+row. If storage deletion fails, the row is preserved for retry.
 
 ## Alternatives Considered
 
@@ -38,8 +55,10 @@ NestJS endpoints after application-layer ownership validation.
 - The MVP remains self-hosted and low-cost.
 - Storage can later be replaced with R2 or another provider behind the same
   port.
-- Orphaned uploaded images can exist when users analyze but never confirm a
-  garment; cleanup is deferred to a future BullMQ maintenance job.
+- Orphaned uploaded images can exist briefly when users analyze but never
+  confirm a garment; cleanup is handled by a BullMQ maintenance job after a
+  grace period.
+- Thumbnails are excluded from domain authority and may be regenerated.
 
 ## Risks
 

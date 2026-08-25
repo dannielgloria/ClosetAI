@@ -34,9 +34,13 @@ import {
 import { GetWeatherContextUseCase, UpdateUserLocationUseCase, weatherCacheKey, WeatherProviderFailedError, WeatherStatus } from "./weather.js";
 import {
   AnalyzeGarmentImageUseCase,
+  CleanupOrphanGarmentImagesUseCase,
   GarmentAnalysis,
   GarmentAnalysisFailedError,
   GarmentAnalyzerPort,
+  GetGarmentImageUseCase,
+  GenerateGarmentThumbnailUseCase,
+  GarmentThumbnailGeneratorPort,
   ObjectStoragePort,
   UploadGarmentImageUseCase
 } from "./garment-analyzer.js";
@@ -218,13 +222,24 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
       const row: GarmentImage = {
         id: `image-${this.garmentImageRows.size + 1}`,
         garmentId: null,
+        thumbnailObjectKey: null,
         createdAt: new Date("2026-08-23T00:00:00.000Z"),
         ...input
       };
       this.garmentImageRows.set(row.id, row);
       return row;
     },
-    findById: async (id: string) => this.garmentImageRows.get(id) ?? null,
+    findById: async (id: string) => {
+      const image = this.garmentImageRows.get(id) ?? null;
+      if (image && this.associateImageOnNextFind === id) {
+        const updated = { ...image, garmentId: "race-garment" };
+        this.garmentImageRows.set(id, updated);
+        this.associateImageOnNextFind = null;
+        return updated;
+      }
+
+      return image;
+    },
     linkToGarment: async (input: { imageId: string; garmentId: string }) => {
       const image = this.garmentImageRows.get(input.imageId);
       if (!image) {
@@ -238,6 +253,29 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
         this.garmentRows.set(garment.id, { ...garment, imageId: linked.id });
       }
       return linked;
+    },
+    updateThumbnailObjectKey: async (input: { imageId: string; thumbnailObjectKey: string }) => {
+      const image = this.garmentImageRows.get(input.imageId);
+      if (!image) {
+        throw new Error("Garment image not found.");
+      }
+
+      const updated = { ...image, thumbnailObjectKey: input.thumbnailObjectKey };
+      this.garmentImageRows.set(updated.id, updated);
+      return updated;
+    },
+    findOrphanedBefore: async (input: { olderThan: Date; limit: number }) =>
+      [...this.garmentImageRows.values()]
+        .filter((image) => image.garmentId === null && image.createdAt.getTime() < input.olderThan.getTime())
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .slice(0, input.limit),
+    deleteOrphanById: async (imageId: string) => {
+      const image = this.garmentImageRows.get(imageId);
+      if (!image || image.garmentId !== null) {
+        return false;
+      }
+
+      return this.garmentImageRows.delete(imageId);
     }
   };
   outfitFeedback = {
@@ -282,6 +320,7 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
   usageEventRows = new Map<string, GarmentUsageEvent>();
   outfitFeedbackRows = new Map<string, OutfitFeedback>();
   garmentStateTransitionRows = new Map<string, GarmentStateTransition>();
+  associateImageOnNextFind: string | null = null;
 
   transaction<T>(work: (ports: ApplicationPorts) => Promise<T>): Promise<T> {
     return work(this);
@@ -379,6 +418,230 @@ describe("MVP use cases", () => {
       secondaryColors: ["BLACK"]
     });
     expect(ports.garmentRows.size).toBe(0);
+  });
+
+  it("enqueues thumbnail generation after image upload without requiring a garment", async () => {
+    const storage = new FakeObjectStorage();
+    const queue = new FakeThumbnailQueue();
+    const image = await new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 10 }, queue).execute({
+      userId: "user-1",
+      content: new Uint8Array([1, 2, 3]),
+      mimeType: "image/jpeg"
+    });
+
+    expect(queue.jobs).toEqual([{ garmentImageId: image.id }]);
+    expect(image.garmentId).toBeNull();
+  });
+
+  it("keeps upload valid when thumbnail enqueue fails", async () => {
+    const storage = new FakeObjectStorage();
+    const queue = new FakeThumbnailQueue(new Error("redis down"));
+    const image = await new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 10 }, queue).execute({
+      userId: "user-1",
+      content: new Uint8Array([1, 2, 3]),
+      mimeType: "image/jpeg"
+    });
+
+    expect(image.userId).toBe("user-1");
+  });
+
+  it("generates and persists a thumbnail only after processing and storage succeed", async () => {
+    const storage = new FakeObjectStorage();
+    const image = await new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 10 }).execute({
+      userId: "user-1",
+      content: new Uint8Array([1, 2, 3]),
+      mimeType: "image/jpeg"
+    });
+
+    const result = await new GenerateGarmentThumbnailUseCase(ports, storage, new FakeThumbnailGenerator()).execute({
+      garmentImageId: image.id
+    });
+
+    expect(result.status).toBe("generated");
+    expect(result.image.thumbnailObjectKey).toBe(`users/user-1/garment-images/${image.id}/thumbnail.webp`);
+    await expect(storage.readObject(result.image.thumbnailObjectKey!)).resolves.toMatchObject({ mimeType: "image/webp" });
+  });
+
+  it("skips thumbnail generation when the existing derivative is present", async () => {
+    const storage = new FakeObjectStorage();
+    const image = await new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 10 }).execute({
+      userId: "user-1",
+      content: new Uint8Array([1, 2, 3]),
+      mimeType: "image/jpeg"
+    });
+    const thumbnailObjectKey = `users/user-1/garment-images/${image.id}/thumbnail.webp`;
+    await storage.writeObject({ objectKey: thumbnailObjectKey, content: new Uint8Array([9]), mimeType: "image/webp" });
+    await ports.garmentImages.updateThumbnailObjectKey({ imageId: image.id, thumbnailObjectKey });
+    const generator = new FakeThumbnailGenerator();
+
+    const result = await new GenerateGarmentThumbnailUseCase(ports, storage, generator).execute({ garmentImageId: image.id });
+
+    expect(result.status).toBe("already_exists");
+    expect(generator.calls).toBe(0);
+  });
+
+  it("does not update thumbnail metadata when original, processing, or storage fails", async () => {
+    const storage = new FakeObjectStorage();
+    const image = await ports.garmentImages.create({
+      userId: "user-1",
+      objectKey: "missing-original.jpg",
+      mimeType: "image/jpeg",
+      size: 1
+    });
+
+    await expect(
+      new GenerateGarmentThumbnailUseCase(ports, storage, new FakeThumbnailGenerator()).execute({ garmentImageId: image.id })
+    ).rejects.toThrow("Object not found.");
+    expect(ports.garmentImageRows.get(image.id)?.thumbnailObjectKey).toBeNull();
+
+    const stored = await new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 10 }).execute({
+      userId: "user-1",
+      content: new Uint8Array([1]),
+      mimeType: "image/jpeg"
+    });
+    await expect(
+      new GenerateGarmentThumbnailUseCase(ports, storage, new FakeThumbnailGenerator(new Error("sharp failed"))).execute({
+        garmentImageId: stored.id
+      })
+    ).rejects.toThrow("sharp failed");
+    expect(ports.garmentImageRows.get(stored.id)?.thumbnailObjectKey).toBeNull();
+
+    storage.failWrites = true;
+    await expect(
+      new GenerateGarmentThumbnailUseCase(ports, storage, new FakeThumbnailGenerator()).execute({ garmentImageId: stored.id })
+    ).rejects.toThrow("Storage write failed.");
+    expect(ports.garmentImageRows.get(stored.id)?.thumbnailObjectKey).toBeNull();
+  });
+
+  it("serves thumbnail variants with fallback to original when the derivative is missing", async () => {
+    const storage = new FakeObjectStorage();
+    const image = await new UploadGarmentImageUseCase(ports, storage, { maxSizeBytes: 10 }).execute({
+      userId: "user-1",
+      content: new Uint8Array([1, 2, 3]),
+      mimeType: "image/png"
+    });
+
+    const original = await new GetGarmentImageUseCase(ports, storage).execute({
+      userId: "user-1",
+      imageId: image.id,
+      variant: "thumbnail"
+    });
+    expect([...original.data]).toEqual([1, 2, 3]);
+
+    const thumbnailObjectKey = `users/user-1/garment-images/${image.id}/thumbnail.webp`;
+    await storage.writeObject({ objectKey: thumbnailObjectKey, content: new Uint8Array([8, 8]), mimeType: "image/webp" });
+    await ports.garmentImages.updateThumbnailObjectKey({ imageId: image.id, thumbnailObjectKey });
+    const thumbnail = await new GetGarmentImageUseCase(ports, storage).execute({
+      userId: "user-1",
+      imageId: image.id,
+      variant: "thumbnail"
+    });
+
+    expect([...thumbnail.data]).toEqual([8, 8]);
+    expect(thumbnail.mimeType).toBe("image/webp");
+  });
+
+  it("cleans up old orphan garment images and preserves recent or associated images", async () => {
+    const storage = new FakeObjectStorage();
+    const old = await ports.garmentImages.create({
+      userId: "user-1",
+      objectKey: "users/user-1/garment-images/old.jpg",
+      mimeType: "image/jpeg",
+      size: 1
+    });
+    ports.garmentImageRows.set(old.id, { ...old, createdAt: new Date("2026-08-22T00:00:00.000Z") });
+    await storage.writeObject({ objectKey: old.objectKey, content: new Uint8Array([1]), mimeType: "image/jpeg" });
+    const thumbnailObjectKey = `users/user-1/garment-images/${old.id}/thumbnail.webp`;
+    await storage.writeObject({ objectKey: thumbnailObjectKey, content: new Uint8Array([2]), mimeType: "image/webp" });
+    await ports.garmentImages.updateThumbnailObjectKey({ imageId: old.id, thumbnailObjectKey });
+
+    const recent = await ports.garmentImages.create({
+      userId: "user-1",
+      objectKey: "users/user-1/garment-images/recent.jpg",
+      mimeType: "image/jpeg",
+      size: 1
+    });
+    await storage.writeObject({ objectKey: recent.objectKey, content: new Uint8Array([3]), mimeType: "image/jpeg" });
+
+    const associated = await ports.garmentImages.create({
+      userId: "user-1",
+      objectKey: "users/user-1/garment-images/associated.jpg",
+      mimeType: "image/jpeg",
+      size: 1
+    });
+    ports.garmentImageRows.set(associated.id, {
+      ...associated,
+      garmentId: "garment-1",
+      createdAt: new Date("2026-08-22T00:00:00.000Z")
+    });
+
+    const result = await new CleanupOrphanGarmentImagesUseCase(ports, storage, { gracePeriodHours: 24, batchSize: 10 }).execute({
+      now: new Date("2026-08-24T00:00:00.000Z")
+    });
+
+    expect(result).toMatchObject({ candidates: 1, deleted: 1, skipped: 0, failed: 0 });
+    expect(ports.garmentImageRows.has(old.id)).toBe(false);
+    await expect(storage.objectExists(old.objectKey)).resolves.toBe(false);
+    await expect(storage.objectExists(thumbnailObjectKey)).resolves.toBe(false);
+    expect(ports.garmentImageRows.has(recent.id)).toBe(true);
+    expect(ports.garmentImageRows.has(associated.id)).toBe(true);
+  });
+
+  it("cleans up DB orphans when storage objects are already absent", async () => {
+    const storage = new FakeObjectStorage();
+    const old = await ports.garmentImages.create({
+      userId: "user-1",
+      objectKey: "users/user-1/garment-images/missing.jpg",
+      mimeType: "image/jpeg",
+      size: 1
+    });
+    ports.garmentImageRows.set(old.id, { ...old, createdAt: new Date("2026-08-22T00:00:00.000Z") });
+
+    const result = await new CleanupOrphanGarmentImagesUseCase(ports, storage, { gracePeriodHours: 24, batchSize: 10 }).execute({
+      now: new Date("2026-08-24T00:00:00.000Z")
+    });
+
+    expect(result.deleted).toBe(1);
+    expect(ports.garmentImageRows.has(old.id)).toBe(false);
+  });
+
+  it("preserves DB records when cleanup storage deletion fails", async () => {
+    const storage = new FakeObjectStorage();
+    const old = await ports.garmentImages.create({
+      userId: "user-1",
+      objectKey: "users/user-1/garment-images/fail.jpg",
+      mimeType: "image/jpeg",
+      size: 1
+    });
+    ports.garmentImageRows.set(old.id, { ...old, createdAt: new Date("2026-08-22T00:00:00.000Z") });
+    await storage.writeObject({ objectKey: old.objectKey, content: new Uint8Array([1]), mimeType: "image/jpeg" });
+    storage.failDeletes = true;
+
+    const result = await new CleanupOrphanGarmentImagesUseCase(ports, storage, { gracePeriodHours: 24, batchSize: 10 }).execute({
+      now: new Date("2026-08-24T00:00:00.000Z")
+    });
+
+    expect(result.failed).toBe(1);
+    expect(ports.garmentImageRows.has(old.id)).toBe(true);
+  });
+
+  it("skips cleanup when a candidate becomes associated before physical deletion", async () => {
+    const storage = new FakeObjectStorage();
+    const old = await ports.garmentImages.create({
+      userId: "user-1",
+      objectKey: "users/user-1/garment-images/race.jpg",
+      mimeType: "image/jpeg",
+      size: 1
+    });
+    ports.garmentImageRows.set(old.id, { ...old, createdAt: new Date("2026-08-22T00:00:00.000Z") });
+    ports.associateImageOnNextFind = old.id;
+
+    const result = await new CleanupOrphanGarmentImagesUseCase(ports, storage, { gracePeriodHours: 24, batchSize: 10 }).execute({
+      now: new Date("2026-08-24T00:00:00.000Z")
+    });
+
+    expect(result).toMatchObject({ candidates: 1, deleted: 0, skipped: 1, failed: 0 });
+    expect(ports.garmentImageRows.get(old.id)?.garmentId).toBe("race-garment");
   });
 
   it("rejects malformed or invalid garment analysis output", async () => {
@@ -940,11 +1203,21 @@ class FakeOutfitStylist implements OutfitStylistPort {
 
 class FakeObjectStorage implements ObjectStoragePort {
   private readonly objects = new Map<string, { data: Uint8Array; mimeType: string }>();
+  failWrites = false;
+  failDeletes = false;
 
   async storeGarmentImage(input: { userId: string; content: Uint8Array; mimeType: string }) {
     const objectKey = `users/${input.userId}/garment-images/${this.objects.size + 1}`;
-    this.objects.set(objectKey, { data: input.content, mimeType: input.mimeType });
+    await this.writeObject({ objectKey, content: input.content, mimeType: input.mimeType });
     return { objectKey };
+  }
+
+  async writeObject(input: { objectKey: string; content: Uint8Array; mimeType: string }): Promise<void> {
+    if (this.failWrites) {
+      throw new Error("Storage write failed.");
+    }
+
+    this.objects.set(input.objectKey, { data: input.content, mimeType: input.mimeType });
   }
 
   async readObject(objectKey: string) {
@@ -954,6 +1227,50 @@ class FakeObjectStorage implements ObjectStoragePort {
     }
 
     return object;
+  }
+
+  async objectExists(objectKey: string): Promise<boolean> {
+    return this.objects.has(objectKey);
+  }
+
+  async deleteObject(objectKey: string): Promise<void> {
+    if (this.failDeletes) {
+      throw new Error("Storage delete failed.");
+    }
+
+    this.objects.delete(objectKey);
+  }
+}
+
+class FakeThumbnailGenerator implements GarmentThumbnailGeneratorPort {
+  calls = 0;
+
+  constructor(private readonly failure?: Error) {}
+
+  async generate(): Promise<{ data: Uint8Array; mimeType: string }> {
+    this.calls += 1;
+    if (this.failure) {
+      throw this.failure;
+    }
+
+    return {
+      data: new Uint8Array([7, 7, 7]),
+      mimeType: "image/webp"
+    };
+  }
+}
+
+class FakeThumbnailQueue {
+  readonly jobs: { garmentImageId: string }[] = [];
+
+  constructor(private readonly failure?: Error) {}
+
+  async enqueueThumbnailGeneration(input: { garmentImageId: string }): Promise<void> {
+    if (this.failure) {
+      throw this.failure;
+    }
+
+    this.jobs.push(input);
   }
 }
 

@@ -7,8 +7,13 @@ import { Algorithm, hash } from "@node-rs/argon2";
 import { PrismaClient } from "@prisma/client";
 import {
   ContextInterpreterPort,
+  CleanupOrphanGarmentImagesUseCase,
   GarmentAnalysisFailedError,
   GarmentAnalyzerPort,
+  GarmentImageBytes,
+  GarmentThumbnailGeneratorPort,
+  GarmentThumbnailQueuePort,
+  GenerateGarmentThumbnailUseCase,
   ObjectStoragePort,
   OutfitStylistFailedError,
   OutfitStylistGarmentCandidate,
@@ -37,6 +42,8 @@ import { configureHttpHardening } from "../src/config/http-hardening.js";
 import { CONTEXT_INTERPRETER } from "../src/context/context-interpreter.provider.js";
 import { GARMENT_ANALYZER } from "../src/garment-analyzer/garment-analyzer.provider.js";
 import { OUTFIT_STYLIST } from "../src/outfit-stylist/outfit-stylist.provider.js";
+import { ApplicationPortFactory } from "../src/prisma/application-port-factory.js";
+import { GARMENT_IMAGE_JOBS } from "../src/storage/garment-image-jobs.provider.js";
 import { OBJECT_STORAGE } from "../src/storage/object-storage.provider.js";
 import { WEATHER_CACHE, WEATHER_PROVIDER } from "../src/weather/weather.provider.js";
 
@@ -107,6 +114,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
   let container: StartedTestContainer;
   let redisContainer: StartedTestContainer;
   let app: INestApplication;
+  let portFactory: ApplicationPortFactory;
   let prisma: PrismaClient;
   let contextInterpreterResult: InterpretedContext | Error;
   let outfitStylistResult: OutfitStylistRecommendationCandidate[] | OutfitStylistFailedError;
@@ -126,6 +134,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     | GarmentAnalysisFailedError;
   const objectStorage = new IntegrationObjectStorage();
   const weatherCache = new IntegrationWeatherCache();
+  const garmentImageJobs = new IntegrationGarmentImageJobs();
 
   beforeAll(async () => {
     container = await new GenericContainer("postgres:16-alpine")
@@ -222,9 +231,12 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       } satisfies GarmentAnalyzerPort)
       .overrideProvider(OBJECT_STORAGE)
       .useValue(objectStorage satisfies ObjectStoragePort)
+      .overrideProvider(GARMENT_IMAGE_JOBS)
+      .useValue(garmentImageJobs satisfies GarmentThumbnailQueuePort)
       .compile();
 
     app = moduleRef.createNestApplication();
+    portFactory = moduleRef.get(ApplicationPortFactory);
     configureHttpHardening(app);
     app.setGlobalPrefix("api/v1");
     app.useGlobalPipes(
@@ -267,6 +279,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     };
     objectStorage.clear();
     weatherCache.clear();
+    garmentImageJobs.clear();
     await prisma.outfitFeedback.deleteMany();
     await prisma.garmentUsageEvent.deleteMany();
     await prisma.outfitItem.deleteMany();
@@ -552,6 +565,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
 
     const upload = await uploadImage(auth.accessToken, "image/jpeg");
+    expect(garmentImageJobs.jobs).toEqual([{ garmentImageId: upload.id }]);
 
     const analysis = await request(app.getHttpServer())
       .post(`/api/v1/garment-images/${upload.id}/analyze`)
@@ -599,6 +613,90 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       .set(authHeader(auth.accessToken))
       .expect(200)
       .expect("content-type", /image\/jpeg/);
+  });
+
+  it("generates a thumbnail derivative and serves it through the authorized image endpoint", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const upload = await uploadImage(auth.accessToken, "image/png");
+
+    const result = await new GenerateGarmentThumbnailUseCase(
+      portFactory.create(),
+      objectStorage,
+      new IntegrationThumbnailGenerator()
+    ).execute({ garmentImageId: upload.id });
+
+    expect(result.status).toBe("generated");
+    await expect(prisma.garmentImage.findUniqueOrThrow({ where: { id: upload.id } })).resolves.toMatchObject({
+      thumbnailObjectKey: `users/${auth.user.id}/garment-images/${upload.id}/thumbnail.webp`
+    });
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/garment-images/${upload.id}?variant=thumbnail`)
+      .set(authHeader(auth.accessToken))
+      .expect(200)
+      .expect("content-type", /image\/webp/);
+  });
+
+  it("falls back to original image bytes when thumbnail is not generated yet", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const upload = await uploadImage(auth.accessToken, "image/jpeg");
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/garment-images/${upload.id}?variant=thumbnail`)
+      .set(authHeader(auth.accessToken))
+      .expect(200)
+      .expect("content-type", /image\/jpeg/);
+  });
+
+  it("does not allow another user to fetch a thumbnail", async () => {
+    const { auth: userA } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const userB = await createUser(userA.accessToken, userA.user.householdId, "User B");
+    await seedCredentials(userB.id, "user-b@example.com", "correct-password");
+    const userBAuth = await login("user-b@example.com");
+    const upload = await uploadImage(userA.accessToken, "image/jpeg");
+    await new GenerateGarmentThumbnailUseCase(portFactory.create(), objectStorage, new IntegrationThumbnailGenerator()).execute({
+      garmentImageId: upload.id
+    });
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/garment-images/${upload.id}?variant=thumbnail`)
+      .set(authHeader(userBAuth.accessToken))
+      .expect(403);
+  });
+
+  it("cleans up old orphan garment images and preserves associated images", async () => {
+    const { auth } = await createAuthenticatedUser("User A", "user-a@example.com");
+    const oldObjectKey = `users/${auth.user.id}/garment-images/orphan.jpg`;
+    const oldThumbnailObjectKey = `users/${auth.user.id}/garment-images/orphan/thumbnail.webp`;
+    await objectStorage.writeObject({ objectKey: oldObjectKey, content: new Uint8Array([1]), mimeType: "image/jpeg" });
+    await objectStorage.writeObject({ objectKey: oldThumbnailObjectKey, content: new Uint8Array([2]), mimeType: "image/webp" });
+    const oldOrphan = await prisma.garmentImage.create({
+      data: {
+        userId: auth.user.id,
+        objectKey: oldObjectKey,
+        thumbnailObjectKey: oldThumbnailObjectKey,
+        mimeType: "image/jpeg",
+        size: 1,
+        createdAt: new Date("2026-08-20T00:00:00.000Z")
+      }
+    });
+    const associatedUpload = await uploadImage(auth.accessToken, "image/jpeg");
+    await request(app.getHttpServer())
+      .post("/api/v1/garments")
+      .set(authHeader(auth.accessToken))
+      .send({ category: "TOP", primaryColor: "black", status: "CLEAN_AVAILABLE", imageId: associatedUpload.id })
+      .expect(201);
+
+    const result = await new CleanupOrphanGarmentImagesUseCase(portFactory.create(), objectStorage, {
+      gracePeriodHours: 24,
+      batchSize: 10
+    }).execute({ now: new Date("2026-08-24T00:00:00.000Z") });
+
+    expect(result).toMatchObject({ candidates: 1, deleted: 1, skipped: 0, failed: 0 });
+    await expect(prisma.garmentImage.findUnique({ where: { id: oldOrphan.id } })).resolves.toBeNull();
+    await expect(objectStorage.objectExists(oldObjectKey)).resolves.toBe(false);
+    await expect(objectStorage.objectExists(oldThumbnailObjectKey)).resolves.toBe(false);
+    await expect(prisma.garmentImage.findUnique({ where: { id: associatedUpload.id } })).resolves.not.toBeNull();
   });
 
   it("rejects invalid or unauthenticated garment image uploads", async () => {
@@ -1256,8 +1354,12 @@ class IntegrationObjectStorage implements ObjectStoragePort {
 
   async storeGarmentImage(input: { userId: string; content: Uint8Array; mimeType: string }) {
     const objectKey = `users/${input.userId}/garment-images/${this.objects.size + 1}`;
-    this.objects.set(objectKey, { data: input.content, mimeType: input.mimeType });
+    await this.writeObject({ objectKey, content: input.content, mimeType: input.mimeType });
     return { objectKey };
+  }
+
+  async writeObject(input: { objectKey: string; content: Uint8Array; mimeType: string }): Promise<void> {
+    this.objects.set(input.objectKey, { data: input.content, mimeType: input.mimeType });
   }
 
   async readObject(objectKey: string) {
@@ -1267,6 +1369,35 @@ class IntegrationObjectStorage implements ObjectStoragePort {
     }
 
     return object;
+  }
+
+  async objectExists(objectKey: string): Promise<boolean> {
+    return this.objects.has(objectKey);
+  }
+
+  async deleteObject(objectKey: string): Promise<void> {
+    this.objects.delete(objectKey);
+  }
+}
+
+class IntegrationGarmentImageJobs implements GarmentThumbnailQueuePort {
+  readonly jobs: { garmentImageId: string }[] = [];
+
+  clear(): void {
+    this.jobs.length = 0;
+  }
+
+  async enqueueThumbnailGeneration(input: { garmentImageId: string }): Promise<void> {
+    this.jobs.push(input);
+  }
+}
+
+class IntegrationThumbnailGenerator implements GarmentThumbnailGeneratorPort {
+  async generate(): Promise<GarmentImageBytes> {
+    return {
+      data: new Uint8Array([9, 9, 9]),
+      mimeType: "image/webp"
+    };
   }
 }
 

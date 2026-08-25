@@ -5,6 +5,7 @@ import {
   Inject,
   Param,
   Post,
+  Query,
   Res,
   ServiceUnavailableException,
   UploadedFile,
@@ -23,6 +24,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiProduces,
+  ApiQuery,
   ApiServiceUnavailableResponse,
   ApiTags,
   ApiUnauthorizedResponse
@@ -32,6 +34,7 @@ import {
   AuthenticatedUser,
   GarmentAnalysisFailedError,
   GetGarmentImageUseCase,
+  GarmentThumbnailQueuePort,
   UploadGarmentImageUseCase
 } from "@closet-ai/application";
 import { Response } from "express";
@@ -41,6 +44,7 @@ import { CurrentUser } from "../auth/current-user.decorator.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import { GARMENT_ANALYZER, GarmentAnalyzerProvider } from "../garment-analyzer/garment-analyzer.provider.js";
 import { ApplicationPortFactory } from "../prisma/application-port-factory.js";
+import { GARMENT_IMAGE_JOBS } from "../storage/garment-image-jobs.provider.js";
 import { OBJECT_STORAGE, ObjectStorageProvider } from "../storage/object-storage.provider.js";
 import { GarmentAnalysisResponseDto, GarmentImageUploadResponseDto } from "./dtos.js";
 import { mapUseCaseError } from "./http-errors.js";
@@ -59,6 +63,7 @@ export class GarmentImagesController {
   constructor(
     private readonly portFactory: ApplicationPortFactory,
     @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStorageProvider,
+    @Inject(GARMENT_IMAGE_JOBS) private readonly garmentImageJobs: GarmentThumbnailQueuePort,
     @Inject(GARMENT_ANALYZER) private readonly garmentAnalyzer: GarmentAnalyzerProvider,
     @Inject(AI_CONFIG) private readonly aiConfig: AiConfig
   ) {}
@@ -87,9 +92,14 @@ export class GarmentImagesController {
     @UploadedFile() file: UploadedGarmentFile | undefined
   ): Promise<GarmentImageUploadResponseDto> {
     try {
-      const image = await new UploadGarmentImageUseCase(this.portFactory.create(), this.objectStorage, {
-        maxSizeBytes: this.aiConfig.garmentImageMaxSizeBytes
-      }).execute({
+      const image = await new UploadGarmentImageUseCase(
+        this.portFactory.create(),
+        this.objectStorage,
+        {
+          maxSizeBytes: this.aiConfig.garmentImageMaxSizeBytes
+        },
+        this.garmentImageJobs
+      ).execute({
         userId: currentUser.userId,
         content: file?.buffer ?? new Uint8Array(),
         mimeType: file?.mimetype ?? ""
@@ -130,16 +140,23 @@ export class GarmentImagesController {
 
   @Get(":imageId")
   @ApiOperation({ summary: "Fetch a private garment image." })
+  @ApiQuery({ name: "variant", required: false, enum: ["original", "thumbnail"] })
   @ApiProduces("image/jpeg", "image/png", "image/webp")
   @ApiOkResponse({ description: "Image bytes." })
   @ApiUnauthorizedResponse({ description: "Missing, invalid, or revoked access token." })
   @ApiForbiddenResponse({ description: "Garment image belongs to a different user." })
   @ApiNotFoundResponse({ description: "Garment image not found." })
-  async getImage(@CurrentUser() currentUser: AuthenticatedUser, @Param("imageId") imageId: string, @Res() response: Response): Promise<void> {
+  async getImage(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Param("imageId") imageId: string,
+    @Query("variant") variant: string | undefined,
+    @Res() response: Response
+  ): Promise<void> {
     try {
       const image = await new GetGarmentImageUseCase(this.portFactory.create(), this.objectStorage).execute({
         userId: currentUser.userId,
-        imageId
+        imageId,
+        variant: variant === "thumbnail" ? "thumbnail" : "original"
       });
       response.contentType(image.mimeType);
       response.send(Buffer.from(image.data));

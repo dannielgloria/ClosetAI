@@ -1,9 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, normalize, sep } from "node:path";
-import { Inject, Injectable } from "@nestjs/common";
 import { ObjectStoragePort } from "@closet-ai/application";
-import { STORAGE_CONFIG, StorageConfig } from "./storage-config.js";
 
 const EXTENSIONS_BY_MIME_TYPE: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -11,19 +9,21 @@ const EXTENSIONS_BY_MIME_TYPE: Record<string, string> = {
   "image/webp": "webp"
 };
 
-@Injectable()
 export class LocalObjectStorageAdapter implements ObjectStoragePort {
-  constructor(@Inject(STORAGE_CONFIG) private readonly config: StorageConfig) {}
+  constructor(private readonly objectStorageRoot: string) {}
 
   async storeGarmentImage(input: { userId: string; content: Uint8Array; mimeType: string }): Promise<{ objectKey: string }> {
     const extension = EXTENSIONS_BY_MIME_TYPE[input.mimeType] ?? "bin";
     const objectKey = `users/${input.userId}/garment-images/${randomUUID()}.${extension}`;
-    const path = this.resolveObjectPath(objectKey);
-
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, input.content);
+    await this.writeObject({ objectKey, content: input.content, mimeType: input.mimeType });
 
     return { objectKey };
+  }
+
+  async writeObject(input: { objectKey: string; content: Uint8Array; mimeType: string }): Promise<void> {
+    const path = this.resolveObjectPath(input.objectKey);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, input.content);
   }
 
   async readObject(objectKey: string): Promise<{ data: Uint8Array; mimeType: string }> {
@@ -32,12 +32,6 @@ export class LocalObjectStorageAdapter implements ObjectStoragePort {
       data,
       mimeType: mimeTypeFromObjectKey(objectKey)
     };
-  }
-
-  async writeObject(input: { objectKey: string; content: Uint8Array; mimeType: string }): Promise<void> {
-    const path = this.resolveObjectPath(input.objectKey);
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, input.content);
   }
 
   async objectExists(objectKey: string): Promise<boolean> {
@@ -54,8 +48,8 @@ export class LocalObjectStorageAdapter implements ObjectStoragePort {
   }
 
   private resolveObjectPath(objectKey: string): string {
-    const path = normalize(join(this.config.objectStorageRoot, objectKey));
-    const root = normalize(this.config.objectStorageRoot);
+    const path = normalize(join(this.objectStorageRoot, objectKey));
+    const root = normalize(this.objectStorageRoot);
     if (path !== root && !path.startsWith(`${root}${sep}`)) {
       throw new Error("Invalid object key.");
     }

@@ -1,5 +1,19 @@
 # Closet AI Worker
 
-NestJS worker process placeholder.
+Background worker for operational jobs approved in the modular monolith.
 
-BullMQ/Redis are approved for background work, but the first vertical slice is synchronous and does not enqueue jobs yet.
+Current queue:
+
+```text
+garment-image-maintenance
+```
+
+Jobs:
+
+```text
+generate-garment-thumbnail
+cleanup-orphan-garment-images
+```
+
+Processors call application use cases. They do not query Prisma directly for
+business behavior and do not depend on public object-storage paths.

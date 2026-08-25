@@ -82,6 +82,10 @@ class WardrobeController extends ChangeNotifier {
     return _repository.fetchGarmentImage(imageId);
   }
 
+  Future<List<int>> fetchGarmentThumbnail(String imageId) {
+    return _repository.fetchGarmentThumbnail(imageId);
+  }
+
   Future<Garment> getGarment(String garmentId) {
     return _repository.getGarment(garmentId);
   }

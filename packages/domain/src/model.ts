@@ -145,6 +145,7 @@ export interface GarmentImage {
   userId: EntityId;
   garmentId: EntityId | null;
   objectKey: string;
+  thumbnailObjectKey: string | null;
   mimeType: string;
   size: number;
   createdAt: Date;

@@ -118,7 +118,12 @@ class AuthPorts implements ApplicationPorts, UnitOfWorkPort {
     findById: async () => null,
     linkToGarment: async (): Promise<GarmentImage> => {
       throw new Error("not implemented");
-    }
+    },
+    updateThumbnailObjectKey: async (): Promise<GarmentImage> => {
+      throw new Error("not implemented");
+    },
+    findOrphanedBefore: async () => [],
+    deleteOrphanById: async () => false
   };
   outfits = {
     create: async () => {

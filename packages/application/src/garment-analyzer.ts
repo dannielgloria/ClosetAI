@@ -2,6 +2,7 @@ import {
   EntityId,
   GarmentCategory,
   GarmentFit,
+  GarmentImage,
   GarmentMaterial,
   GarmentPattern,
   GarmentSubcategory
@@ -10,6 +11,12 @@ import { ApplicationPorts } from "./ports.js";
 
 export const ALLOWED_GARMENT_IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 export const DEFAULT_GARMENT_IMAGE_MAX_SIZE_MB = 8;
+export const GARMENT_THUMBNAIL_MAX_DIMENSION_PX = 512;
+export const GARMENT_IMAGE_MAINTENANCE_QUEUE = "garment-image-maintenance";
+export const GENERATE_GARMENT_THUMBNAIL_JOB = "generate-garment-thumbnail";
+export const CLEANUP_ORPHAN_GARMENT_IMAGES_JOB = "cleanup-orphan-garment-images";
+export const DEFAULT_GARMENT_IMAGE_ORPHAN_GRACE_HOURS = 24;
+export const DEFAULT_GARMENT_IMAGE_CLEANUP_BATCH_SIZE = 100;
 
 export interface GarmentImageBytes {
   data: Uint8Array;
@@ -18,7 +25,18 @@ export interface GarmentImageBytes {
 
 export interface ObjectStoragePort {
   storeGarmentImage(input: { userId: EntityId; content: Uint8Array; mimeType: string }): Promise<{ objectKey: string }>;
+  writeObject(input: { objectKey: string; content: Uint8Array; mimeType: string }): Promise<void>;
   readObject(objectKey: string): Promise<GarmentImageBytes>;
+  objectExists(objectKey: string): Promise<boolean>;
+  deleteObject(objectKey: string): Promise<void>;
+}
+
+export interface GarmentThumbnailGeneratorPort {
+  generate(input: GarmentImageBytes): Promise<GarmentImageBytes>;
+}
+
+export interface GarmentThumbnailQueuePort {
+  enqueueThumbnailGeneration(input: { garmentImageId: EntityId }): Promise<void>;
 }
 
 export interface GarmentAnalysis {
@@ -47,7 +65,8 @@ export class UploadGarmentImageUseCase {
   constructor(
     private readonly ports: ApplicationPorts,
     private readonly objectStorage: ObjectStoragePort,
-    private readonly config: { maxSizeBytes: number }
+    private readonly config: { maxSizeBytes: number },
+    private readonly thumbnailQueue?: GarmentThumbnailQueuePort
   ) {}
 
   async execute(input: { userId: EntityId; content: Uint8Array; mimeType: string }) {
@@ -64,12 +83,20 @@ export class UploadGarmentImageUseCase {
       mimeType: input.mimeType
     });
 
-    return this.ports.garmentImages.create({
+    const image = await this.ports.garmentImages.create({
       userId: input.userId,
       objectKey: stored.objectKey,
       mimeType: input.mimeType,
       size: input.content.byteLength
     });
+
+    try {
+      await this.thumbnailQueue?.enqueueThumbnailGeneration({ garmentImageId: image.id });
+    } catch {
+      // Thumbnail generation is derived maintenance work; the original image remains valid.
+    }
+
+    return image;
   }
 }
 
@@ -109,7 +136,7 @@ export class GetGarmentImageUseCase {
     private readonly objectStorage: ObjectStoragePort
   ) {}
 
-  async execute(input: { userId: EntityId; imageId: EntityId }): Promise<GarmentImageBytes> {
+  async execute(input: { userId: EntityId; imageId: EntityId; variant?: "original" | "thumbnail" }): Promise<GarmentImageBytes> {
     const image = await this.ports.garmentImages.findById(input.imageId);
     if (!image) {
       throw new Error("Garment image not found.");
@@ -119,7 +146,97 @@ export class GetGarmentImageUseCase {
       throw new Error("Garment image access is forbidden.");
     }
 
+    if (input.variant === "thumbnail" && image.thumbnailObjectKey) {
+      try {
+        return await this.objectStorage.readObject(image.thumbnailObjectKey);
+      } catch {
+        return this.objectStorage.readObject(image.objectKey);
+      }
+    }
+
     return this.objectStorage.readObject(image.objectKey);
+  }
+}
+
+export class GenerateGarmentThumbnailUseCase {
+  constructor(
+    private readonly ports: ApplicationPorts,
+    private readonly objectStorage: ObjectStoragePort,
+    private readonly thumbnailGenerator: GarmentThumbnailGeneratorPort
+  ) {}
+
+  async execute(input: { garmentImageId: EntityId }): Promise<{ status: "generated" | "already_exists"; image: GarmentImage }> {
+    const image = await this.ports.garmentImages.findById(input.garmentImageId);
+    if (!image) {
+      throw new Error("Garment image not found.");
+    }
+
+    if (image.thumbnailObjectKey && (await this.objectStorage.objectExists(image.thumbnailObjectKey))) {
+      return { status: "already_exists", image };
+    }
+
+    const original = await this.objectStorage.readObject(image.objectKey);
+    const thumbnail = await this.thumbnailGenerator.generate(original);
+    const thumbnailObjectKey = thumbnailObjectKeyFor(image);
+
+    await this.objectStorage.writeObject({
+      objectKey: thumbnailObjectKey,
+      content: thumbnail.data,
+      mimeType: thumbnail.mimeType
+    });
+
+    const updated = await this.ports.garmentImages.updateThumbnailObjectKey({
+      imageId: image.id,
+      thumbnailObjectKey
+    });
+
+    return { status: "generated", image: updated };
+  }
+}
+
+export class CleanupOrphanGarmentImagesUseCase {
+  constructor(
+    private readonly ports: ApplicationPorts,
+    private readonly objectStorage: ObjectStoragePort,
+    private readonly config: { gracePeriodHours: number; batchSize: number }
+  ) {}
+
+  async execute(input: { now?: Date } = {}): Promise<{ candidates: number; deleted: number; skipped: number; failed: number }> {
+    const now = input.now ?? new Date();
+    const olderThan = new Date(now.getTime() - this.config.gracePeriodHours * 60 * 60 * 1000);
+    const candidates = await this.ports.garmentImages.findOrphanedBefore({
+      olderThan,
+      limit: this.config.batchSize
+    });
+
+    let deleted = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const candidate of candidates) {
+      const current = await this.ports.garmentImages.findById(candidate.id);
+      if (!current || current.garmentId || current.createdAt.getTime() > olderThan.getTime()) {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        await this.objectStorage.deleteObject(current.objectKey);
+        if (current.thumbnailObjectKey) {
+          await this.objectStorage.deleteObject(current.thumbnailObjectKey);
+        }
+
+        if (await this.ports.garmentImages.deleteOrphanById(current.id)) {
+          deleted += 1;
+        } else {
+          skipped += 1;
+        }
+      } catch {
+        failed += 1;
+      }
+    }
+
+    return { candidates: candidates.length, deleted, skipped, failed };
   }
 }
 
@@ -157,6 +274,10 @@ function validateImageUpload(input: { content: Uint8Array; mimeType: string }, m
   if (input.content.byteLength > maxSizeBytes) {
     throw new Error("Garment image is too large.");
   }
+}
+
+function thumbnailObjectKeyFor(image: GarmentImage): string {
+  return `users/${image.userId}/garment-images/${image.id}/thumbnail.webp`;
 }
 
 function parseEnum<T extends Record<string, string>>(value: unknown, candidates: T): T[keyof T] {

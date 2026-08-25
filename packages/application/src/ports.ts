@@ -87,6 +87,9 @@ export interface GarmentImageRepositoryPort {
   create(input: { userId: EntityId; objectKey: string; mimeType: string; size: number }): Promise<GarmentImage>;
   findById(id: EntityId): Promise<GarmentImage | null>;
   linkToGarment(input: { imageId: EntityId; garmentId: EntityId }): Promise<GarmentImage>;
+  updateThumbnailObjectKey(input: { imageId: EntityId; thumbnailObjectKey: string }): Promise<GarmentImage>;
+  findOrphanedBefore(input: { olderThan: Date; limit: number }): Promise<GarmentImage[]>;
+  deleteOrphanById(imageId: EntityId): Promise<boolean>;
 }
 
 export interface OutfitRepositoryPort {

@@ -49,6 +49,8 @@ void main() {
 
     expect(find.text('Digital Closet'), findsOneWidget);
     expect(find.text('Black tee'), findsOneWidget);
+    expect(repository.thumbnailImageFetches, greaterThan(0));
+    expect(repository.originalImageFetches, 0);
 
     await tester.tap(find.byTooltip('Register garment'));
     await tester.pumpAndSettle();
@@ -313,6 +315,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Status: CLEAN_AVAILABLE'), findsOneWidget);
       expect(find.text('Iniciar lavado'), findsNothing);
+      expect(repository.thumbnailImageFetches, greaterThan(0));
+      expect(repository.originalImageFetches, greaterThan(0));
 
       await tester.tap(find.text('Editar'));
       await tester.pumpAndSettle();
@@ -445,6 +449,7 @@ class FakeWardrobeRepository implements WardrobeRepository {
       wearCount: 0,
       lastWornAt: null,
       name: 'Black tee',
+      imageId: 'image-1',
     ),
   ];
 
@@ -640,6 +645,8 @@ class FakeWardrobeRepository implements WardrobeRepository {
 
   int uploadedImages = 0;
   int analyzedImages = 0;
+  int originalImageFetches = 0;
+  int thumbnailImageFetches = 0;
   String? lastCreatedImageId;
   String? lastCreatedPrimaryColor;
 
@@ -670,76 +677,85 @@ class FakeWardrobeRepository implements WardrobeRepository {
 
   @override
   Future<List<int>> fetchGarmentImage(String imageId) async {
-    return const [
-      137,
-      80,
-      78,
-      71,
-      13,
-      10,
-      26,
-      10,
-      0,
-      0,
-      0,
-      13,
-      73,
-      72,
-      68,
-      82,
-      0,
-      0,
-      0,
-      1,
-      0,
-      0,
-      0,
-      1,
-      8,
-      6,
-      0,
-      0,
-      0,
-      31,
-      21,
-      196,
-      137,
-      0,
-      0,
-      0,
-      10,
-      73,
-      68,
-      65,
-      84,
-      120,
-      156,
-      99,
-      0,
-      1,
-      0,
-      0,
-      5,
-      0,
-      1,
-      13,
-      10,
-      45,
-      180,
-      0,
-      0,
-      0,
-      0,
-      73,
-      69,
-      78,
-      68,
-      174,
-      66,
-      96,
-      130,
-    ];
+    originalImageFetches += 1;
+    return _onePixelPng;
   }
+
+  @override
+  Future<List<int>> fetchGarmentThumbnail(String imageId) async {
+    thumbnailImageFetches += 1;
+    return _onePixelPng;
+  }
+
+  static const _onePixelPng = [
+    137,
+    80,
+    78,
+    71,
+    13,
+    10,
+    26,
+    10,
+    0,
+    0,
+    0,
+    13,
+    73,
+    72,
+    68,
+    82,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    1,
+    8,
+    6,
+    0,
+    0,
+    0,
+    31,
+    21,
+    196,
+    137,
+    0,
+    0,
+    0,
+    10,
+    73,
+    68,
+    65,
+    84,
+    120,
+    156,
+    99,
+    0,
+    1,
+    0,
+    0,
+    5,
+    0,
+    1,
+    13,
+    10,
+    45,
+    180,
+    0,
+    0,
+    0,
+    0,
+    73,
+    69,
+    78,
+    68,
+    174,
+    66,
+    96,
+    130,
+  ];
 
   @override
   Future<UserLocation> updateLocation(UserLocation location) async {

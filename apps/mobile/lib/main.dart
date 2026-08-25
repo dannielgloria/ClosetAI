@@ -429,7 +429,7 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
               for (final garment in _controller.garments)
                 _GarmentTile(
                   garment: garment,
-                  fetchImage: _controller.fetchGarmentImage,
+                  fetchImage: _controller.fetchGarmentThumbnail,
                   onTap: () => _showGarmentDetail(garment),
                 ),
             const SizedBox(height: 28),

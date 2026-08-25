@@ -33,6 +33,8 @@ abstract interface class WardrobeRepository {
 
   Future<List<int>> fetchGarmentImage(String imageId);
 
+  Future<List<int>> fetchGarmentThumbnail(String imageId);
+
   Future<Garment> updateGarment({
     required String garmentId,
     String? category,
@@ -172,6 +174,11 @@ class ApiWardrobeRepository implements WardrobeRepository {
   @override
   Future<List<int>> fetchGarmentImage(String imageId) {
     return _apiClient.getBytes('/garment-images/$imageId');
+  }
+
+  @override
+  Future<List<int>> fetchGarmentThumbnail(String imageId) {
+    return _apiClient.getBytes('/garment-images/$imageId?variant=thumbnail');
   }
 
   @override

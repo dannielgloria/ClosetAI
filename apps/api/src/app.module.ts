@@ -18,7 +18,9 @@ import { OpenAIGarmentAnalyzerAdapter } from "./garment-analyzer/openai-garment-
 import { GARMENT_ANALYZER } from "./garment-analyzer/garment-analyzer.provider.js";
 import { LocalObjectStorageAdapter } from "./storage/local-object-storage.adapter.js";
 import { OBJECT_STORAGE } from "./storage/object-storage.provider.js";
+import { BullMqGarmentImageJobsAdapter, GARMENT_IMAGE_JOBS } from "./storage/garment-image-jobs.provider.js";
 import { getStorageConfig, STORAGE_CONFIG } from "./storage/storage-config.js";
+import { getStorageMaintenanceConfig, STORAGE_MAINTENANCE_CONFIG } from "./storage/storage-maintenance-config.js";
 import { getWeatherRuntimeConfig, WEATHER_CONFIG } from "./weather/weather-config.js";
 import { OpenMeteoAdapter } from "./weather/open-meteo.adapter.js";
 import { RedisWeatherCacheAdapter } from "./weather/redis-weather-cache.adapter.js";
@@ -46,6 +48,10 @@ import { WEATHER_CACHE, WEATHER_PROVIDER } from "./weather/weather.provider.js";
       useFactory: getStorageConfig
     },
     {
+      provide: STORAGE_MAINTENANCE_CONFIG,
+      useFactory: getStorageMaintenanceConfig
+    },
+    {
       provide: WEATHER_CONFIG,
       useFactory: getWeatherRuntimeConfig
     },
@@ -53,6 +59,11 @@ import { WEATHER_CACHE, WEATHER_PROVIDER } from "./weather/weather.provider.js";
     {
       provide: OBJECT_STORAGE,
       useExisting: LocalObjectStorageAdapter
+    },
+    BullMqGarmentImageJobsAdapter,
+    {
+      provide: GARMENT_IMAGE_JOBS,
+      useExisting: BullMqGarmentImageJobsAdapter
     },
     OpenAIOutfitStylistAdapter,
     {

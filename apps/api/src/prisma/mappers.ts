@@ -75,6 +75,7 @@ type PrismaGarmentImage = {
   userId: string;
   garmentId: string | null;
   objectKey: string;
+  thumbnailObjectKey: string | null;
   mimeType: string;
   size: number;
   createdAt: Date;
@@ -188,6 +189,7 @@ export function mapGarmentImage(row: PrismaGarmentImage): GarmentImage {
     userId: row.userId,
     garmentId: row.garmentId,
     objectKey: row.objectKey,
+    thumbnailObjectKey: row.thumbnailObjectKey,
     mimeType: row.mimeType,
     size: row.size,
     createdAt: row.createdAt

@@ -490,6 +490,10 @@ image/webp
 
 Maximum size is configured by `GARMENT_IMAGE_MAX_SIZE_MB`.
 
+After the original image is persisted, the backend enqueues a private thumbnail
+generation job. Thumbnail generation is best-effort derived maintenance work:
+upload success does not depend on thumbnail success.
+
 Response:
 
 ```json
@@ -546,15 +550,20 @@ Responses:
 
 ```text
 GET /api/v1/garment-images/{imageId}
+GET /api/v1/garment-images/{imageId}?variant=thumbnail
 ```
 
 Requires Bearer auth. Returns private image bytes after ownership validation.
 No physical object-storage path is exposed.
 
+`variant=thumbnail` requests the derived private WebP thumbnail. If the
+thumbnail has not been generated yet or cannot be read, the API returns the
+original image bytes instead of a broken image response.
+
 Responses:
 
 ```text
-200 image bytes
+200 image bytes, original or thumbnail depending on variant availability
 401 missing, invalid, expired, or revoked access token
 403 image belongs to another user
 404 image not found
