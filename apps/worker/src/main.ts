@@ -1,4 +1,4 @@
-import { getWorkerConfig } from "./config.js";
+import { getWorkerConfig, validateWorkerProductionConfig } from "./config.js";
 import { createGarmentImageMaintenanceRuntime, scheduleGarmentImageMaintenanceJobs } from "./garment-image-maintenance-worker.js";
 
 export function getWorkerStatus() {
@@ -9,6 +9,7 @@ export function getWorkerStatus() {
 }
 
 export async function startWorker() {
+  validateWorkerProductionConfig();
   const config = getWorkerConfig();
   const schedulerQueue = await scheduleGarmentImageMaintenanceJobs(config);
   await schedulerQueue.close();

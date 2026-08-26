@@ -15,6 +15,7 @@ export interface RuntimeConfig {
   port: number;
   corsAllowedOrigins: string[];
   jsonPayloadLimit: string;
+  trustProxyHops: number;
 }
 
 export function getRuntimeConfig(): RuntimeConfig {
@@ -22,7 +23,8 @@ export function getRuntimeConfig(): RuntimeConfig {
     environment: getEnvironment(),
     port: process.env.PORT ? Number(process.env.PORT) : 3000,
     corsAllowedOrigins: parseCsv(process.env.CORS_ALLOWED_ORIGINS),
-    jsonPayloadLimit: process.env.JSON_PAYLOAD_LIMIT ?? "1mb"
+    jsonPayloadLimit: process.env.JSON_PAYLOAD_LIMIT ?? "1mb",
+    trustProxyHops: readNonNegativeInteger("TRUST_PROXY_HOPS", 0)
   };
 }
 
@@ -82,4 +84,9 @@ function parseCsv(value: string | undefined): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function readNonNegativeInteger(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value >= 0 ? value : fallback;
 }

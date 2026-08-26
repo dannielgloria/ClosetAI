@@ -10,6 +10,7 @@ async function bootstrap() {
   validateProductionConfig();
   const runtimeConfig = getRuntimeConfig();
   const app = await NestFactory.create(AppModule);
+  app.enableShutdownHooks();
   configureHttpHardening(app);
   app.setGlobalPrefix("api/v1");
   app.useGlobalPipes(

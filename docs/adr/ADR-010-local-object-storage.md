@@ -63,5 +63,8 @@ row. If storage deletion fails, the row is preserved for retry.
 ## Risks
 
 - Local object storage must be included in backups.
+- Original garment images are authoritative and must be included in Restic
+  backups. Thumbnails are derived and can be excluded from backups when the
+  exclusion is operationally simple.
 - Large images are currently validated at the application boundary after upload
   reaches NestJS memory; stricter streaming limits can be added if needed.

@@ -2,17 +2,10 @@
 
 Closet AI is a personal Wardrobe Intelligence Platform built as a modular monolith.
 
-## Current Slice
+## Current Runtime
 
-This bootstrap implements the first MVP vertical slice without AI:
-
-1. Create household/user.
-2. Create garments.
-3. List available garments.
-4. Generate a basic deterministic outfit.
-5. Select an outfit.
-6. Confirm usage idempotently.
-7. Persist garment usage events.
+Closet AI runs as a modular monolith with a NestJS API, a NestJS worker,
+PostgreSQL, Redis/BullMQ, Flutter, and private local object storage.
 
 ## Local Setup
 
@@ -20,8 +13,27 @@ This bootstrap implements the first MVP vertical slice without AI:
 pnpm install
 pnpm prisma:generate
 cp .env.example .env
-docker compose up -d postgres redis
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres redis
 pnpm --filter @closet-ai/api start:dev
 ```
 
 Flutter is intentionally isolated under `apps/mobile` and requires the Flutter SDK.
+
+## Production Runtime
+
+The single-host Docker Compose runtime is documented in:
+
+```text
+docs/operations/production-runtime-v1.md
+```
+
+At a high level:
+
+```sh
+cp .env.production.example .env
+docker compose build
+docker compose up -d
+```
+
+Only Caddy publishes ports `80` and `443`. PostgreSQL, Redis, worker, and object
+storage stay private inside the Compose network.

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   ApplicationPorts,
   CLEANUP_ORPHAN_GARMENT_IMAGES_JOB,
@@ -10,10 +10,39 @@ import {
 import { GarmentImage } from "@closet-ai/domain";
 import { processGarmentImageMaintenanceJob } from "./garment-image-maintenance-worker.js";
 import { getWorkerStatus } from "./main.js";
+import { getWorkerConfig, validateWorkerProductionConfig } from "./config.js";
 
 describe("garment image maintenance worker", () => {
+  const originalEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
   it("reports the garment image maintenance queue", () => {
     expect(getWorkerStatus()).toEqual({ status: "ready", queues: [GARMENT_IMAGE_MAINTENANCE_QUEUE] });
+  });
+
+  it("fails fast in production when worker runtime configuration is missing", () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.DATABASE_URL;
+    delete process.env.REDIS_URL;
+    delete process.env.OBJECT_STORAGE_ROOT;
+
+    expect(() => validateWorkerProductionConfig()).toThrow("Missing worker production configuration");
+  });
+
+  it("accepts minimal worker production configuration", () => {
+    process.env.NODE_ENV = "production";
+    process.env.DATABASE_URL = "postgresql://closet_ai:strong-password@postgres:5432/closet_ai";
+    process.env.REDIS_URL = "redis://redis:6379";
+    process.env.OBJECT_STORAGE_ROOT = "/data/closet-ai/objects";
+
+    expect(() => validateWorkerProductionConfig()).not.toThrow();
+    expect(getWorkerConfig()).toMatchObject({
+      environment: "production",
+      objectStorageRoot: "/data/closet-ai/objects"
+    });
   });
 
   it("generates a thumbnail from a small job payload", async () => {

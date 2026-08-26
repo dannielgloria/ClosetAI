@@ -54,4 +54,10 @@ describe("runtime configuration", () => {
     expect(() => validateProductionConfig()).not.toThrow();
     expect(getRuntimeConfig().corsAllowedOrigins).toEqual(["https://closet.example"]);
   });
+
+  it("reads trusted proxy hops as an explicit opt-in", () => {
+    process.env.TRUST_PROXY_HOPS = "1";
+
+    expect(getRuntimeConfig().trustProxyHops).toBe(1);
+  });
 });
