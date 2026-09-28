@@ -512,10 +512,44 @@ class _WardrobeHomeScreenState extends State<WardrobeHomeScreen> {
                           '${recommendation.items.map((item) => _garmentLabel(item.garmentId)).join('\n')}\n\n${recommendation.explanation}',
                         ),
                       ),
+                      if (_controller
+                              .visualizationImagesByOutfitId[recommendation
+                              .id] !=
+                          null)
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 420),
+                          child: Image.memory(
+                            Uint8List.fromList(
+                              _controller
+                                  .visualizationImagesByOutfitId[recommendation
+                                  .id]!,
+                            ),
+                            fit: BoxFit.contain,
+                            semanticLabel: 'Visualización del outfit',
+                          ),
+                        )
+                      else if ({'PENDING', 'PROCESSING'}.contains(
+                        _controller
+                            .visualizationsByOutfitId[recommendation.id]
+                            ?.status,
+                      ))
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: LinearProgressIndicator(),
+                        ),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
                         children: [
+                          TextButton.icon(
+                            onPressed: _controller.isLoading
+                                ? null
+                                : () => _controller.visualizeOutfit(
+                                    recommendation.id,
+                                  ),
+                            icon: const Icon(Icons.visibility_outlined),
+                            label: const Text('Ver outfit'),
+                          ),
                           TextButton.icon(
                             onPressed: recommendation.status == 'SELECTED'
                                 ? null

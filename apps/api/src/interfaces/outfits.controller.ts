@@ -1,5 +1,6 @@
-import { Body, Controller, HttpCode, Inject, Logger, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Inject, Logger, Param, Post, Res, UseGuards } from "@nestjs/common";
 import {
+  ApiAcceptedResponse,
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -7,6 +8,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse
 } from "@nestjs/swagger";
@@ -14,13 +16,21 @@ import {
   AuthenticatedUser,
   ConfirmOutfitUsageUseCase,
   GenerateOutfitRecommendationsUseCase,
+  GetLatestOutfitVisualizationUseCase,
+  GetOutfitVisualizationImageUseCase,
+  GetOutfitVisualizationUseCase,
+  OutfitVisualizationQueuePort,
+  RequestOutfitVisualizationUseCase,
   SelectOutfitUseCase,
   SubmitOutfitFeedbackUseCase
 } from "@closet-ai/application";
+import { Response } from "express";
 import { CurrentUser } from "../auth/current-user.decorator.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import { ApplicationPortFactory } from "../prisma/application-port-factory.js";
+import { OBJECT_STORAGE, ObjectStorageProvider } from "../storage/object-storage.provider.js";
 import { OUTFIT_STYLIST, OutfitStylistProvider } from "../outfit-stylist/outfit-stylist.provider.js";
+import { OUTFIT_VISUALIZATION_JOBS } from "../outfit-visualization/outfit-visualization-jobs.provider.js";
 import { WEATHER_CACHE, WeatherCacheProvider, WEATHER_PROVIDER, WeatherProvider } from "../weather/weather.provider.js";
 import { WEATHER_CONFIG, WeatherRuntimeConfig } from "../weather/weather-config.js";
 import {
@@ -29,6 +39,7 @@ import {
   GenerateOutfitRecommendationsDto,
   GenerateOutfitRecommendationsResponseDto,
   OutfitFeedbackResponseDto,
+  OutfitVisualizationResponseDto,
   OutfitResponseDto,
   SubmitOutfitFeedbackDto
 } from "./dtos.js";
@@ -46,7 +57,9 @@ export class OutfitsController {
     @Inject(OUTFIT_STYLIST) private readonly outfitStylist: OutfitStylistProvider,
     @Inject(WEATHER_PROVIDER) private readonly weatherProvider: WeatherProvider,
     @Inject(WEATHER_CACHE) private readonly weatherCache: WeatherCacheProvider,
-    @Inject(WEATHER_CONFIG) private readonly weatherConfig: WeatherRuntimeConfig
+    @Inject(WEATHER_CONFIG) private readonly weatherConfig: WeatherRuntimeConfig,
+    @Inject(OBJECT_STORAGE) private readonly objectStorage: ObjectStorageProvider,
+    @Inject(OUTFIT_VISUALIZATION_JOBS) private readonly outfitVisualizationJobs: OutfitVisualizationQueuePort
   ) {}
 
   @Post("outfit-recommendations")
@@ -149,4 +162,130 @@ export class OutfitsController {
       mapUseCaseError(error);
     }
   }
+
+  @Post("outfits/:outfitId/visualizations")
+  @HttpCode(202)
+  @ApiOperation({ summary: "Request an on-demand derived visualization for a valid outfit." })
+  @ApiAcceptedResponse({ type: OutfitVisualizationResponseDto })
+  @ApiUnauthorizedResponse({ description: "Missing, invalid, or revoked access token." })
+  @ApiForbiddenResponse({ description: "Outfit belongs to a different user." })
+  @ApiNotFoundResponse({ description: "Outfit not found." })
+  async requestVisualization(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Param("outfitId") outfitId: string
+  ): Promise<OutfitVisualizationResponseDto> {
+    try {
+      const visualization = await new RequestOutfitVisualizationUseCase(
+        this.portFactory.create(),
+        this.outfitVisualizationJobs
+      ).execute({
+        userId: currentUser.userId,
+        outfitId
+      });
+
+      return mapOutfitVisualizationResponse(visualization);
+    } catch (error) {
+      mapUseCaseError(error);
+    }
+  }
+
+  @Get("outfits/:outfitId/visualizations/latest")
+  @ApiOperation({ summary: "Get the latest ready visualization for an outfit." })
+  @ApiOkResponse({ type: OutfitVisualizationResponseDto })
+  @ApiUnauthorizedResponse({ description: "Missing, invalid, or revoked access token." })
+  @ApiForbiddenResponse({ description: "Outfit belongs to a different user." })
+  @ApiNotFoundResponse({ description: "Outfit or ready visualization not found." })
+  async getLatestVisualization(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Param("outfitId") outfitId: string
+  ): Promise<OutfitVisualizationResponseDto> {
+    try {
+      const visualization = await new GetLatestOutfitVisualizationUseCase(this.portFactory.create()).execute({
+        userId: currentUser.userId,
+        outfitId
+      });
+
+      return mapOutfitVisualizationResponse(visualization);
+    } catch (error) {
+      mapUseCaseError(error);
+    }
+  }
+
+  @Get("outfits/:outfitId/visualizations/:visualizationId")
+  @ApiOperation({ summary: "Get visualization status for an outfit." })
+  @ApiOkResponse({ type: OutfitVisualizationResponseDto })
+  @ApiUnauthorizedResponse({ description: "Missing, invalid, or revoked access token." })
+  @ApiForbiddenResponse({ description: "Outfit visualization belongs to a different user." })
+  @ApiNotFoundResponse({ description: "Outfit or visualization not found." })
+  async getVisualization(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Param("outfitId") outfitId: string,
+    @Param("visualizationId") visualizationId: string
+  ): Promise<OutfitVisualizationResponseDto> {
+    try {
+      const visualization = await new GetOutfitVisualizationUseCase(this.portFactory.create()).execute({
+        userId: currentUser.userId,
+        outfitId,
+        visualizationId
+      });
+
+      return mapOutfitVisualizationResponse(visualization);
+    } catch (error) {
+      mapUseCaseError(error);
+    }
+  }
+
+  @Get("outfits/:outfitId/visualizations/:visualizationId/image")
+  @ApiOperation({ summary: "Fetch a private generated outfit visualization image." })
+  @ApiProduces("image/jpeg", "image/png", "image/webp")
+  @ApiOkResponse({ description: "Image bytes." })
+  @ApiUnauthorizedResponse({ description: "Missing, invalid, or revoked access token." })
+  @ApiForbiddenResponse({ description: "Outfit visualization belongs to a different user." })
+  @ApiNotFoundResponse({ description: "Outfit visualization image not found." })
+  async getVisualizationImage(
+    @CurrentUser() currentUser: AuthenticatedUser,
+    @Param("outfitId") outfitId: string,
+    @Param("visualizationId") visualizationId: string,
+    @Res() response: Response
+  ): Promise<void> {
+    try {
+      const image = await new GetOutfitVisualizationImageUseCase(this.portFactory.create(), this.objectStorage).execute({
+        userId: currentUser.userId,
+        outfitId,
+        visualizationId
+      });
+      response.contentType(image.mimeType);
+      response.send(Buffer.from(image.data));
+    } catch (error) {
+      mapUseCaseError(error);
+    }
+  }
+}
+
+function mapOutfitVisualizationResponse(visualization: {
+  id: string;
+  outfitId: string;
+  status: OutfitVisualizationResponseDto["status"];
+  objectKey: string | null;
+  provider: string | null;
+  model: string | null;
+  promptVersion: string | null;
+  errorCode: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt: Date | null;
+}): OutfitVisualizationResponseDto {
+  return {
+    id: visualization.id,
+    outfitId: visualization.outfitId,
+    status: visualization.status,
+    imageAvailable: visualization.objectKey !== null,
+    provider: visualization.provider,
+    model: visualization.model,
+    promptVersion: visualization.promptVersion,
+    errorCode: visualization.errorCode,
+    createdAt: visualization.createdAt,
+    updatedAt: visualization.updatedAt,
+    completedAt: visualization.completedAt
+  };
 }

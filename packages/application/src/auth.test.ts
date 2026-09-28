@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { AuthSession, ClosetUser, GarmentImage, OutfitFeedback, UserCredential } from "@closet-ai/domain";
+import { AuthSession, ClosetUser, GarmentImage, OutfitFeedback, OutfitVisualization, UserCredential } from "@closet-ai/domain";
 import { ApplicationPorts, UnitOfWorkPort } from "./ports.js";
 import {
   AccessTokenIssuerPort,
@@ -143,6 +143,25 @@ class AuthPorts implements ApplicationPorts, UnitOfWorkPort {
       throw new Error("not implemented");
     },
     findByOutfitId: async (): Promise<OutfitFeedback[]> => []
+  };
+  outfitVisualizations = {
+    createPending: async (): Promise<OutfitVisualization> => {
+      throw new Error("not implemented");
+    },
+    findById: async () => null,
+    findLatestReadyByOutfitId: async () => null,
+    markProcessing: async (): Promise<OutfitVisualization> => {
+      throw new Error("not implemented");
+    },
+    markReady: async (): Promise<OutfitVisualization> => {
+      throw new Error("not implemented");
+    },
+    markFailed: async (): Promise<OutfitVisualization> => {
+      throw new Error("not implemented");
+    },
+    updateStatus: async (): Promise<OutfitVisualization> => {
+      throw new Error("not implemented");
+    }
   };
   garmentStateTransitions = {
     create: async () => {

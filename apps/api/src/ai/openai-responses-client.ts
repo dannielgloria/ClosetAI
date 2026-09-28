@@ -5,6 +5,7 @@ export const AI_CONFIG = Symbol("AI_CONFIG");
 
 export interface OpenAIResponseResult {
   output_text?: string;
+  output?: unknown[];
   status?: string;
   usage?: unknown;
 }

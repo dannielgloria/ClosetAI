@@ -1,6 +1,7 @@
 import '../domain/garment.dart';
 import '../domain/interpreted_context.dart';
 import '../domain/outfit_recommendation.dart';
+import '../domain/outfit_visualization.dart';
 import '../domain/weather.dart';
 import 'closet_api_client.dart';
 
@@ -67,6 +68,16 @@ abstract interface class WardrobeRepository {
     required String outfitId,
     required String decision,
     String? reason,
+  });
+
+  Future<OutfitVisualization> requestOutfitVisualization(String outfitId);
+  Future<OutfitVisualization> getOutfitVisualization({
+    required String outfitId,
+    required String visualizationId,
+  });
+  Future<List<int>> fetchOutfitVisualizationImage({
+    required String outfitId,
+    required String visualizationId,
   });
 }
 
@@ -266,5 +277,36 @@ class ApiWardrobeRepository implements WardrobeRepository {
     );
 
     return OutfitFeedback.fromJson(row);
+  }
+
+  @override
+  Future<OutfitVisualization> requestOutfitVisualization(
+    String outfitId,
+  ) async {
+    final row = await _apiClient.postObject(
+      '/outfits/$outfitId/visualizations',
+    );
+    return OutfitVisualization.fromJson(row);
+  }
+
+  @override
+  Future<OutfitVisualization> getOutfitVisualization({
+    required String outfitId,
+    required String visualizationId,
+  }) async {
+    final row = await _apiClient.getObject(
+      '/outfits/$outfitId/visualizations/$visualizationId',
+    );
+    return OutfitVisualization.fromJson(row);
+  }
+
+  @override
+  Future<List<int>> fetchOutfitVisualizationImage({
+    required String outfitId,
+    required String visualizationId,
+  }) {
+    return _apiClient.getBytes(
+      '/outfits/$outfitId/visualizations/$visualizationId/image',
+    );
   }
 }

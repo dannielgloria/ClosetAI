@@ -1,10 +1,11 @@
 import { getWorkerConfig, validateWorkerProductionConfig } from "./config.js";
 import { createGarmentImageMaintenanceRuntime, scheduleGarmentImageMaintenanceJobs } from "./garment-image-maintenance-worker.js";
+import { createOutfitVisualizationRuntime } from "./outfit-visualization-worker.js";
 
 export function getWorkerStatus() {
   return {
     status: "ready",
-    queues: ["garment-image-maintenance"]
+    queues: ["garment-image-maintenance", "outfit-visualization"]
   };
 }
 
@@ -13,10 +14,12 @@ export async function startWorker() {
   const config = getWorkerConfig();
   const schedulerQueue = await scheduleGarmentImageMaintenanceJobs(config);
   await schedulerQueue.close();
-  const runtime = createGarmentImageMaintenanceRuntime(config);
+  const garmentImageRuntime = createGarmentImageMaintenanceRuntime(config);
+  const outfitVisualizationRuntime = createOutfitVisualizationRuntime(config);
 
   const shutdown = async () => {
-    await runtime.close();
+    await outfitVisualizationRuntime.close();
+    await garmentImageRuntime.close();
     process.exit(0);
   };
 
@@ -27,7 +30,14 @@ export async function startWorker() {
     void shutdown();
   });
 
-  return runtime;
+  return {
+    garmentImageRuntime,
+    outfitVisualizationRuntime,
+    async close() {
+      await outfitVisualizationRuntime.close();
+      await garmentImageRuntime.close();
+    }
+  };
 }
 
 if (process.env.NODE_ENV !== "test") {

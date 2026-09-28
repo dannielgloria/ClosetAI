@@ -29,6 +29,7 @@ const config: AiConfig = {
   contextModel: "test-context-model",
   outfitModel: "test-outfit-model",
   visionModel: "test-vision-model",
+  outfitVisualizationModel: "test-visualization-model",
   requestTimeoutMs: 5000,
   garmentImageMaxSizeBytes: 8 * 1024 * 1024
 };

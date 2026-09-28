@@ -103,6 +103,13 @@ export enum OutfitFeedbackDecision {
   REJECTED = "REJECTED"
 }
 
+export enum OutfitVisualizationStatus {
+  PENDING = "PENDING",
+  PROCESSING = "PROCESSING",
+  READY = "READY",
+  FAILED = "FAILED"
+}
+
 export interface Household {
   id: EntityId;
   name: string;
@@ -195,6 +202,22 @@ export interface OutfitFeedback {
   decision: OutfitFeedbackDecision;
   reason: string | null;
   createdAt: Date;
+}
+
+export interface OutfitVisualization {
+  id: EntityId;
+  outfitId: EntityId;
+  userId: EntityId;
+  status: OutfitVisualizationStatus;
+  objectKey: string | null;
+  mimeType: string | null;
+  provider: string | null;
+  model: string | null;
+  promptVersion: string | null;
+  errorCode: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt: Date | null;
 }
 
 export interface UserCredential {

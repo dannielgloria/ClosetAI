@@ -20,7 +20,7 @@ describe("garment image maintenance worker", () => {
   });
 
   it("reports the garment image maintenance queue", () => {
-    expect(getWorkerStatus()).toEqual({ status: "ready", queues: [GARMENT_IMAGE_MAINTENANCE_QUEUE] });
+    expect(getWorkerStatus()).toEqual({ status: "ready", queues: [GARMENT_IMAGE_MAINTENANCE_QUEUE, "outfit-visualization"] });
   });
 
   it("fails fast in production when worker runtime configuration is missing", () => {
@@ -28,6 +28,9 @@ describe("garment image maintenance worker", () => {
     delete process.env.DATABASE_URL;
     delete process.env.REDIS_URL;
     delete process.env.OBJECT_STORAGE_ROOT;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_OUTFIT_VISUALIZATION_MODEL;
+    delete process.env.AI_OUTFIT_MODEL;
 
     expect(() => validateWorkerProductionConfig()).toThrow("Missing worker production configuration");
   });
@@ -37,6 +40,9 @@ describe("garment image maintenance worker", () => {
     process.env.DATABASE_URL = "postgresql://closet_ai:strong-password@postgres:5432/closet_ai";
     process.env.REDIS_URL = "redis://redis:6379";
     process.env.OBJECT_STORAGE_ROOT = "/data/closet-ai/objects";
+    process.env.OPENAI_API_KEY = "strong-openai-key";
+    process.env.AI_OUTFIT_VISUALIZATION_MODEL = "gpt-image-example";
+    process.env.AI_OUTFIT_MODEL = "gpt-example";
 
     expect(() => validateWorkerProductionConfig()).not.toThrow();
     expect(getWorkerConfig()).toMatchObject({
@@ -161,6 +167,7 @@ class WorkerTestPorts {
     outfits: unsupportedOutfits(),
     usageEvents: unsupportedUsageEvents(),
     outfitFeedback: unsupportedOutfitFeedback(),
+    outfitVisualizations: unsupportedOutfitVisualizations(),
     garmentStateTransitions: unsupportedGarmentStateTransitions()
   };
 }
@@ -259,6 +266,18 @@ function unsupportedUsageEvents(): ApplicationPorts["usageEvents"] {
 
 function unsupportedOutfitFeedback(): ApplicationPorts["outfitFeedback"] {
   return { create: unsupported, findByOutfitId: unsupported };
+}
+
+function unsupportedOutfitVisualizations(): ApplicationPorts["outfitVisualizations"] {
+  return {
+    createPending: unsupported,
+    findById: unsupported,
+    findLatestReadyByOutfitId: unsupported,
+    markProcessing: unsupported,
+    markReady: unsupported,
+    markFailed: unsupported,
+    updateStatus: unsupported
+  };
 }
 
 function unsupportedGarmentStateTransitions(): ApplicationPorts["garmentStateTransitions"] {

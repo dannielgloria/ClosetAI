@@ -25,6 +25,12 @@ import { getWeatherRuntimeConfig, WEATHER_CONFIG } from "./weather/weather-confi
 import { OpenMeteoAdapter } from "./weather/open-meteo.adapter.js";
 import { RedisWeatherCacheAdapter } from "./weather/redis-weather-cache.adapter.js";
 import { WEATHER_CACHE, WEATHER_PROVIDER } from "./weather/weather.provider.js";
+import { OpenAIOutfitVisualizationAdapter } from "./outfit-visualization/openai-outfit-visualization.adapter.js";
+import { OUTFIT_VISUALIZER } from "./outfit-visualization/outfit-visualization.provider.js";
+import {
+  BullMqOutfitVisualizationJobsAdapter,
+  OUTFIT_VISUALIZATION_JOBS
+} from "./outfit-visualization/outfit-visualization-jobs.provider.js";
 
 @Module({
   imports: [PrismaModule, AuthModule, ContextModule],
@@ -65,6 +71,11 @@ import { WEATHER_CACHE, WEATHER_PROVIDER } from "./weather/weather.provider.js";
       provide: GARMENT_IMAGE_JOBS,
       useExisting: BullMqGarmentImageJobsAdapter
     },
+    BullMqOutfitVisualizationJobsAdapter,
+    {
+      provide: OUTFIT_VISUALIZATION_JOBS,
+      useExisting: BullMqOutfitVisualizationJobsAdapter
+    },
     OpenAIOutfitStylistAdapter,
     {
       provide: OUTFIT_STYLIST,
@@ -74,6 +85,11 @@ import { WEATHER_CACHE, WEATHER_PROVIDER } from "./weather/weather.provider.js";
     {
       provide: GARMENT_ANALYZER,
       useExisting: OpenAIGarmentAnalyzerAdapter
+    },
+    OpenAIOutfitVisualizationAdapter,
+    {
+      provide: OUTFIT_VISUALIZER,
+      useExisting: OpenAIOutfitVisualizationAdapter
     },
     OpenMeteoAdapter,
     {

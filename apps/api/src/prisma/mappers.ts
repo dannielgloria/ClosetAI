@@ -16,6 +16,8 @@ import {
   Outfit,
   OutfitFeedback,
   OutfitFeedbackDecision,
+  OutfitVisualization,
+  OutfitVisualizationStatus,
   OutfitStatus,
   UserCredential
 } from "@closet-ai/domain";
@@ -107,6 +109,21 @@ type PrismaOutfitFeedback = {
   decision: string;
   reason: string | null;
   createdAt: Date;
+};
+type PrismaOutfitVisualization = {
+  id: string;
+  outfitId: string;
+  userId: string;
+  status: string;
+  objectKey: string | null;
+  mimeType: string | null;
+  provider: string | null;
+  model: string | null;
+  promptVersion: string | null;
+  errorCode: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt: Date | null;
 };
 type PrismaGarmentStateTransition = {
   id: string;
@@ -230,6 +247,24 @@ export function mapOutfitFeedback(row: PrismaOutfitFeedback): OutfitFeedback {
     decision: row.decision as OutfitFeedbackDecision,
     reason: row.reason,
     createdAt: row.createdAt
+  };
+}
+
+export function mapOutfitVisualization(row: PrismaOutfitVisualization): OutfitVisualization {
+  return {
+    id: row.id,
+    outfitId: row.outfitId,
+    userId: row.userId,
+    status: row.status as OutfitVisualizationStatus,
+    objectKey: row.objectKey,
+    mimeType: row.mimeType,
+    provider: row.provider,
+    model: row.model,
+    promptVersion: row.promptVersion,
+    errorCode: row.errorCode,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    completedAt: row.completedAt
   };
 }
 

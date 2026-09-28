@@ -7,6 +7,7 @@ const INSECURE_PRODUCTION_VALUES = new Set([
   "replace-with-openai-api-key-when-enabled",
   "replace-with-openai-context-model",
   "replace-with-openai-outfit-model",
+  "replace-with-openai-outfit-visualization-model",
   "replace-when-ai-is-enabled"
 ]);
 
@@ -42,7 +43,8 @@ export function validateProductionConfig(): void {
     "OPENAI_API_KEY",
     "AI_CONTEXT_MODEL",
     "AI_OUTFIT_MODEL",
-    "AI_VISION_MODEL"
+    "AI_VISION_MODEL",
+    "AI_OUTFIT_VISUALIZATION_MODEL"
   ];
   const missingOrInsecure = required.filter((name) => {
     const value = process.env[name]?.trim() ?? "";

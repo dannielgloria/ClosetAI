@@ -5,3 +5,4 @@ export * from "./context.js";
 export * from "./outfit-stylist.js";
 export * from "./garment-analyzer.js";
 export * from "./weather.js";
+export * from "./outfit-visualization.js";

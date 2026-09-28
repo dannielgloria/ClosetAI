@@ -4,6 +4,7 @@ import '../data/wardrobe_repository.dart';
 import '../domain/garment.dart';
 import '../domain/interpreted_context.dart';
 import '../domain/outfit_recommendation.dart';
+import '../domain/outfit_visualization.dart';
 import '../domain/weather.dart';
 
 class WardrobeController extends ChangeNotifier {
@@ -17,6 +18,8 @@ class WardrobeController extends ChangeNotifier {
   String? recommendationStrategy;
   List<OutfitRecommendation> recommendations = const [];
   Map<String, String> feedbackByOutfitId = const {};
+  Map<String, OutfitVisualization> visualizationsByOutfitId = const {};
+  Map<String, List<int>> visualizationImagesByOutfitId = const {};
   UserLocation? location;
   WeatherContext? weather;
   String? weatherStatus;
@@ -192,6 +195,56 @@ class WardrobeController extends ChangeNotifier {
       feedbackByOutfitId = {
         ...feedbackByOutfitId,
         feedback.outfitId: feedback.decision,
+      };
+    });
+  }
+
+  Future<void> visualizeOutfit(
+    String outfitId, {
+    Duration pollInterval = const Duration(seconds: 2),
+    int maxPollAttempts = 15,
+  }) async {
+    await _run(() async {
+      var visualization = await _repository.requestOutfitVisualization(
+        outfitId,
+      );
+      visualizationsByOutfitId = {
+        ...visualizationsByOutfitId,
+        outfitId: visualization,
+      };
+      notifyListeners();
+
+      for (
+        var attempt = 0;
+        visualization.status == 'PENDING' ||
+            visualization.status == 'PROCESSING';
+        attempt++
+      ) {
+        if (attempt >= maxPollAttempts) {
+          throw StateError('Visualization timed out.');
+        }
+        await Future<void>.delayed(pollInterval);
+        visualization = await _repository.getOutfitVisualization(
+          outfitId: outfitId,
+          visualizationId: visualization.id,
+        );
+        visualizationsByOutfitId = {
+          ...visualizationsByOutfitId,
+          outfitId: visualization,
+        };
+        notifyListeners();
+      }
+
+      if (visualization.status != 'READY' || !visualization.imageAvailable) {
+        throw StateError('No se pudo generar la visualización.');
+      }
+      final image = await _repository.fetchOutfitVisualizationImage(
+        outfitId: outfitId,
+        visualizationId: visualization.id,
+      );
+      visualizationImagesByOutfitId = {
+        ...visualizationImagesByOutfitId,
+        outfitId: image,
       };
     });
   }

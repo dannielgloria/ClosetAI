@@ -1,4 +1,5 @@
 import 'package:closet_ai_mobile/application/auth_controller.dart';
+import 'package:closet_ai_mobile/application/wardrobe_controller.dart';
 import 'package:closet_ai_mobile/data/auth_repository.dart';
 import 'package:closet_ai_mobile/data/context_repository.dart';
 import 'package:closet_ai_mobile/data/wardrobe_repository.dart';
@@ -6,6 +7,7 @@ import 'package:closet_ai_mobile/domain/auth_user.dart';
 import 'package:closet_ai_mobile/domain/garment.dart';
 import 'package:closet_ai_mobile/domain/interpreted_context.dart';
 import 'package:closet_ai_mobile/domain/outfit_recommendation.dart';
+import 'package:closet_ai_mobile/domain/outfit_visualization.dart';
 import 'package:closet_ai_mobile/domain/weather.dart';
 import 'package:closet_ai_mobile/main.dart';
 import 'package:flutter/material.dart';
@@ -93,6 +95,18 @@ void main() {
       scrollable: find.byType(Scrollable).last,
     );
     expect(find.text('LOOK 91/100'), findsOneWidget);
+    expect(find.textContaining('Ready for dinner'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Ver outfit'),
+      300,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Ver outfit'));
+    await tester.pumpAndSettle();
+
+    expect(repository.visualizationRequests, 1);
+    expect(find.bySemanticsLabel('Visualización del outfit'), findsOneWidget);
     expect(find.textContaining('Ready for dinner'), findsOneWidget);
 
     await tester.scrollUntilVisible(
@@ -419,17 +433,30 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Transition unavailable'), findsOneWidget);
   });
+
+  test('visualization failure keeps an explicit controller error', () async {
+    final controller = WardrobeController(
+      FakeWardrobeRepository(failVisualization: true),
+    );
+
+    await controller.visualizeOutfit('outfit-1', pollInterval: Duration.zero);
+
+    expect(controller.errorMessage, contains('Visualization unavailable'));
+    expect(controller.visualizationImagesByOutfitId, isEmpty);
+  });
 }
 
 class FakeWardrobeRepository implements WardrobeRepository {
   FakeWardrobeRepository({
     this.failFeedback = false,
     this.failTransition = false,
+    this.failVisualization = false,
   });
 
   int createdGarments = 0;
   final bool failFeedback;
   final bool failTransition;
+  final bool failVisualization;
   final List<String> feedbackDecisions = [];
   final List<String> transitions = [];
   String? lastFeedbackReason;
@@ -777,6 +804,45 @@ class FakeWardrobeRepository implements WardrobeRepository {
   }
 
   UserLocation? lastLocation;
+
+  int visualizationRequests = 0;
+
+  @override
+  Future<OutfitVisualization> requestOutfitVisualization(
+    String outfitId,
+  ) async {
+    if (failVisualization) {
+      throw Exception('Visualization unavailable');
+    }
+    visualizationRequests += 1;
+    return OutfitVisualization(
+      id: 'visualization-1',
+      outfitId: outfitId,
+      status: 'READY',
+      imageAvailable: true,
+    );
+  }
+
+  @override
+  Future<OutfitVisualization> getOutfitVisualization({
+    required String outfitId,
+    required String visualizationId,
+  }) async {
+    return OutfitVisualization(
+      id: visualizationId,
+      outfitId: outfitId,
+      status: 'READY',
+      imageAvailable: true,
+    );
+  }
+
+  @override
+  Future<List<int>> fetchOutfitVisualizationImage({
+    required String outfitId,
+    required String visualizationId,
+  }) async {
+    return _onePixelPng;
+  }
 }
 
 class FakeAuthRepository implements AuthRepository {

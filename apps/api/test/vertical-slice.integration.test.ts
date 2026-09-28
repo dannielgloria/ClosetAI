@@ -15,6 +15,7 @@ import {
   GarmentThumbnailQueuePort,
   GenerateGarmentThumbnailUseCase,
   ObjectStoragePort,
+  OutfitVisualizationQueuePort,
   OutfitStylistFailedError,
   OutfitStylistGarmentCandidate,
   OutfitStylistPort,
@@ -42,6 +43,7 @@ import { configureHttpHardening } from "../src/config/http-hardening.js";
 import { CONTEXT_INTERPRETER } from "../src/context/context-interpreter.provider.js";
 import { GARMENT_ANALYZER } from "../src/garment-analyzer/garment-analyzer.provider.js";
 import { OUTFIT_STYLIST } from "../src/outfit-stylist/outfit-stylist.provider.js";
+import { OUTFIT_VISUALIZATION_JOBS } from "../src/outfit-visualization/outfit-visualization-jobs.provider.js";
 import { ApplicationPortFactory } from "../src/prisma/application-port-factory.js";
 import { GARMENT_IMAGE_JOBS } from "../src/storage/garment-image-jobs.provider.js";
 import { OBJECT_STORAGE } from "../src/storage/object-storage.provider.js";
@@ -135,6 +137,7 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
   const objectStorage = new IntegrationObjectStorage();
   const weatherCache = new IntegrationWeatherCache();
   const garmentImageJobs = new IntegrationGarmentImageJobs();
+  const outfitVisualizationJobs = new IntegrationOutfitVisualizationJobs();
 
   beforeAll(async () => {
     container = await new GenericContainer("postgres:16-alpine")
@@ -233,6 +236,8 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
       .useValue(objectStorage satisfies ObjectStoragePort)
       .overrideProvider(GARMENT_IMAGE_JOBS)
       .useValue(garmentImageJobs satisfies GarmentThumbnailQueuePort)
+      .overrideProvider(OUTFIT_VISUALIZATION_JOBS)
+      .useValue(outfitVisualizationJobs satisfies OutfitVisualizationQueuePort)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -280,7 +285,9 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     objectStorage.clear();
     weatherCache.clear();
     garmentImageJobs.clear();
+    outfitVisualizationJobs.clear();
     await prisma.outfitFeedback.deleteMany();
+    await prisma.outfitVisualization.deleteMany();
     await prisma.garmentUsageEvent.deleteMany();
     await prisma.outfitItem.deleteMany();
     await prisma.outfit.deleteMany();
@@ -298,6 +305,38 @@ describe("MVP vertical slice with authentication and PostgreSQL", () => {
     await prisma?.$disconnect();
     await redisContainer?.stop();
     await container?.stop();
+  });
+
+  it("creates an on-demand visualization job and protects outfit ownership", async () => {
+    const userA = await createAuthenticatedUser("User A", "visual-a@example.com");
+    const outfitA = await createDeterministicOutfit(userA.auth.accessToken);
+
+    const visualization = await request(app.getHttpServer())
+      .post(`/api/v1/outfits/${outfitA.id}/visualizations`)
+      .set(authHeader(userA.auth.accessToken))
+      .expect(202)
+      .then((response) => response.body as { id: string; outfitId: string; status: string; imageAvailable: boolean });
+
+    expect(visualization).toMatchObject({ outfitId: outfitA.id, status: "PENDING", imageAvailable: false });
+    expect(outfitVisualizationJobs.jobs).toEqual([{ outfitVisualizationId: visualization.id }]);
+    await expect(prisma.outfitVisualization.findUniqueOrThrow({ where: { id: visualization.id } })).resolves.toMatchObject({
+      userId: userA.user.id,
+      outfitId: outfitA.id,
+      status: "PENDING"
+    });
+
+    const { user: userB } = await createHousehold("Other Home", "User B");
+    await seedCredentials(userB.id, "visual-b@example.com", "correct-password");
+    const authB = await login("visual-b@example.com");
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/outfits/${outfitA.id}/visualizations`)
+      .set(authHeader(authB.accessToken))
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(`/api/v1/outfits/${outfitA.id}/visualizations/${visualization.id}`)
+      .set(authHeader(authB.accessToken))
+      .expect(403);
   });
 
   it("protects bootstrap with setup secret, password policy, and one-time setup", async () => {
@@ -1388,6 +1427,18 @@ class IntegrationGarmentImageJobs implements GarmentThumbnailQueuePort {
   }
 
   async enqueueThumbnailGeneration(input: { garmentImageId: string }): Promise<void> {
+    this.jobs.push(input);
+  }
+}
+
+class IntegrationOutfitVisualizationJobs implements OutfitVisualizationQueuePort {
+  readonly jobs: { outfitVisualizationId: string }[] = [];
+
+  clear(): void {
+    this.jobs.length = 0;
+  }
+
+  async enqueueVisualization(input: { outfitVisualizationId: string }): Promise<void> {
     this.jobs.push(input);
   }
 }

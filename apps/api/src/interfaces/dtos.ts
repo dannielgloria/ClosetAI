@@ -10,7 +10,8 @@ import {
   GarmentStateTransitionType,
   GarmentStatus,
   GarmentSubcategory,
-  OutfitFeedbackDecision
+  OutfitFeedbackDecision,
+  OutfitVisualizationStatus
 } from "@closet-ai/domain";
 
 export class CreateHouseholdDto {
@@ -404,6 +405,41 @@ export class OutfitFeedbackResponseDto {
 
   @ApiProperty()
   createdAt!: Date;
+}
+
+export class OutfitVisualizationResponseDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiProperty()
+  outfitId!: string;
+
+  @ApiProperty({ enum: OutfitVisualizationStatus })
+  status!: OutfitVisualizationStatus;
+
+  @ApiProperty()
+  imageAvailable!: boolean;
+
+  @ApiProperty({ nullable: true })
+  provider!: string | null;
+
+  @ApiProperty({ nullable: true })
+  model!: string | null;
+
+  @ApiProperty({ nullable: true })
+  promptVersion!: string | null;
+
+  @ApiProperty({ nullable: true })
+  errorCode!: string | null;
+
+  @ApiProperty()
+  createdAt!: Date;
+
+  @ApiProperty()
+  updatedAt!: Date;
+
+  @ApiProperty({ nullable: true })
+  completedAt!: Date | null;
 }
 
 export class ConfirmOutfitUsageResponseDto {

@@ -8,6 +8,7 @@ import {
   GarmentStateTransitionRepositoryPort,
   HouseholdRepositoryPort,
   OutfitFeedbackRepositoryPort,
+  OutfitVisualizationRepositoryPort,
   OutfitRepositoryPort,
   UnitOfWorkPort,
   UsageEventRepositoryPort,
@@ -24,6 +25,7 @@ import {
   mapHousehold,
   mapOutfit,
   mapOutfitFeedback,
+  mapOutfitVisualization,
   mapUsageEvent,
   mapUser,
   mapUserCredential
@@ -47,6 +49,7 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
       outfits: this.createOutfitRepository(db),
       usageEvents: this.createUsageEventRepository(db),
       outfitFeedback: this.createOutfitFeedbackRepository(db),
+      outfitVisualizations: this.createOutfitVisualizationRepository(db),
       garmentStateTransitions: this.createGarmentStateTransitionRepository(db)
     };
   }
@@ -390,6 +393,78 @@ export class ApplicationPortFactory implements UnitOfWorkPort {
         ),
       findByOutfitId: async (outfitId) =>
         (await db.outfitFeedback.findMany({ where: { outfitId }, orderBy: { createdAt: "asc" } })).map(mapOutfitFeedback)
+    };
+  }
+
+  private createOutfitVisualizationRepository(db: DbClient): OutfitVisualizationRepositoryPort {
+    return {
+      createPending: async (input) =>
+        mapOutfitVisualization(
+          await db.outfitVisualization.create({
+            data: {
+              outfitId: input.outfitId,
+              userId: input.userId
+            }
+          })
+        ),
+      findById: async (id) => {
+        const row = await db.outfitVisualization.findUnique({ where: { id } });
+        return row ? mapOutfitVisualization(row) : null;
+      },
+      findLatestReadyByOutfitId: async (outfitId) => {
+        const row = await db.outfitVisualization.findFirst({
+          where: { outfitId, status: "READY" },
+          orderBy: { createdAt: "desc" }
+        });
+        return row ? mapOutfitVisualization(row) : null;
+      },
+      markProcessing: async (id) =>
+        mapOutfitVisualization(
+          await db.outfitVisualization.update({
+            where: { id },
+            data: {
+              status: "PROCESSING",
+              errorCode: null
+            }
+          })
+        ),
+      markReady: async (input) =>
+        mapOutfitVisualization(
+          await db.outfitVisualization.update({
+            where: { id: input.id },
+            data: {
+              status: "READY",
+              objectKey: input.objectKey,
+              mimeType: input.mimeType,
+              provider: input.provider,
+              model: input.model,
+              promptVersion: input.promptVersion,
+              errorCode: null,
+              completedAt: input.completedAt
+            }
+          })
+        ),
+      markFailed: async (input) =>
+        mapOutfitVisualization(
+          await db.outfitVisualization.update({
+            where: { id: input.id },
+            data: {
+              status: "FAILED",
+              provider: input.provider,
+              model: input.model,
+              promptVersion: input.promptVersion,
+              errorCode: input.errorCode,
+              completedAt: input.completedAt
+            }
+          })
+        ),
+      updateStatus: async (id, status) =>
+        mapOutfitVisualization(
+          await db.outfitVisualization.update({
+            where: { id },
+            data: { status }
+          })
+        )
     };
   }
 

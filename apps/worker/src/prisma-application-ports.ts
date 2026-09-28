@@ -7,12 +7,26 @@ import {
   GarmentStateTransitionRepositoryPort,
   HouseholdRepositoryPort,
   OutfitFeedbackRepositoryPort,
+  OutfitVisualizationRepositoryPort,
   OutfitRepositoryPort,
   UsageEventRepositoryPort,
   UserCredentialRepositoryPort,
   UserRepositoryPort
 } from "@closet-ai/application";
-import { GarmentImage } from "@closet-ai/domain";
+import {
+  Garment,
+  GarmentCategory,
+  GarmentFit,
+  GarmentImage,
+  GarmentMaterial,
+  GarmentPattern,
+  GarmentStatus,
+  GarmentSubcategory,
+  Outfit,
+  OutfitStatus,
+  OutfitVisualization,
+  OutfitVisualizationStatus
+} from "@closet-ai/domain";
 
 export function createWorkerApplicationPorts(prisma: PrismaClient): ApplicationPorts {
   return {
@@ -20,12 +34,37 @@ export function createWorkerApplicationPorts(prisma: PrismaClient): ApplicationP
     users: unsupportedUsers(),
     userCredentials: unsupportedUserCredentials(),
     authSessions: unsupportedAuthSessions(),
-    garments: unsupportedGarments(),
+    garments: createGarmentRepository(prisma),
     garmentImages: createGarmentImageRepository(prisma),
-    outfits: unsupportedOutfits(),
+    outfits: createOutfitRepository(prisma),
     usageEvents: unsupportedUsageEvents(),
     outfitFeedback: unsupportedOutfitFeedback(),
+    outfitVisualizations: createOutfitVisualizationRepository(prisma),
     garmentStateTransitions: unsupportedGarmentStateTransitions()
+  };
+}
+
+function createGarmentRepository(prisma: PrismaClient): GarmentRepositoryPort {
+  return {
+    create: unsupported,
+    findByUserId: unsupported,
+    findAvailableByUserId: unsupported,
+    findByIds: async (ids) =>
+      (
+        await prisma.garment.findMany({
+          where: { id: { in: ids } },
+          include: { images: { orderBy: { createdAt: "asc" }, take: 1 } }
+        })
+      ).map(mapGarment),
+    findById: async (id) => {
+      const row = await prisma.garment.findUnique({
+        where: { id },
+        include: { images: { orderBy: { createdAt: "asc" }, take: 1 } }
+      });
+      return row ? mapGarment(row) : null;
+    },
+    updateMetadata: unsupported,
+    save: unsupported
   };
 }
 
@@ -64,6 +103,179 @@ function createGarmentImageRepository(prisma: PrismaClient): GarmentImageReposit
       });
       return result.count > 0;
     }
+  };
+}
+
+function createOutfitRepository(prisma: PrismaClient): OutfitRepositoryPort {
+  return {
+    create: unsupported,
+    findById: async (id) => {
+      const row = await prisma.outfit.findUnique({
+        where: { id },
+        include: { items: { orderBy: { position: "asc" } } }
+      });
+      return row ? mapOutfit(row) : null;
+    },
+    save: unsupported
+  };
+}
+
+function createOutfitVisualizationRepository(prisma: PrismaClient): OutfitVisualizationRepositoryPort {
+  return {
+    createPending: unsupported,
+    findById: async (id) => {
+      const row = await prisma.outfitVisualization.findUnique({ where: { id } });
+      return row ? mapOutfitVisualization(row) : null;
+    },
+    findLatestReadyByOutfitId: async (outfitId) => {
+      const row = await prisma.outfitVisualization.findFirst({
+        where: { outfitId, status: "READY" },
+        orderBy: { createdAt: "desc" }
+      });
+      return row ? mapOutfitVisualization(row) : null;
+    },
+    markProcessing: async (id) =>
+      mapOutfitVisualization(
+        await prisma.outfitVisualization.update({
+          where: { id },
+          data: { status: "PROCESSING", errorCode: null }
+        })
+      ),
+    markReady: async (input) =>
+      mapOutfitVisualization(
+        await prisma.outfitVisualization.update({
+          where: { id: input.id },
+          data: {
+            status: "READY",
+            objectKey: input.objectKey,
+            mimeType: input.mimeType,
+            provider: input.provider,
+            model: input.model,
+            promptVersion: input.promptVersion,
+            errorCode: null,
+            completedAt: input.completedAt
+          }
+        })
+      ),
+    markFailed: async (input) =>
+      mapOutfitVisualization(
+        await prisma.outfitVisualization.update({
+          where: { id: input.id },
+          data: {
+            status: "FAILED",
+            provider: input.provider,
+            model: input.model,
+            promptVersion: input.promptVersion,
+            errorCode: input.errorCode,
+            completedAt: input.completedAt
+          }
+        })
+      ),
+    updateStatus: async (id, status) =>
+      mapOutfitVisualization(
+        await prisma.outfitVisualization.update({
+          where: { id },
+          data: { status }
+        })
+      )
+  };
+}
+
+function mapGarment(row: {
+  id: string;
+  userId: string;
+  category: string;
+  subcategory: string | null;
+  primaryColor: string;
+  secondaryColors: string[];
+  pattern: string | null;
+  fit: string | null;
+  estimatedMaterial: string | null;
+  formality: number | null;
+  status: string;
+  name: string | null;
+  wearCount: number;
+  lastWornAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  images?: { id: string; createdAt: Date }[];
+}): Garment {
+  return {
+    id: row.id,
+    userId: row.userId,
+    category: row.category as GarmentCategory,
+    subcategory: row.subcategory as GarmentSubcategory | null,
+    primaryColor: row.primaryColor,
+    secondaryColors: row.secondaryColors,
+    pattern: row.pattern as GarmentPattern | null,
+    fit: row.fit as GarmentFit | null,
+    estimatedMaterial: row.estimatedMaterial as GarmentMaterial | null,
+    formality: row.formality,
+    status: row.status as GarmentStatus,
+    name: row.name ?? undefined,
+    imageId: row.images?.[0]?.id,
+    wearCount: row.wearCount,
+    lastWornAt: row.lastWornAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+function mapOutfit(row: {
+  id: string;
+  userId: string;
+  status: string;
+  explanation: string;
+  score: number;
+  selectedAt: Date | null;
+  wornAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  items: { garmentId: string; position: number }[];
+}): Outfit {
+  return {
+    id: row.id,
+    userId: row.userId,
+    status: row.status as OutfitStatus,
+    items: row.items.map((item) => ({ garmentId: item.garmentId, position: item.position })),
+    explanation: row.explanation,
+    score: row.score,
+    selectedAt: row.selectedAt,
+    wornAt: row.wornAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+function mapOutfitVisualization(row: {
+  id: string;
+  outfitId: string;
+  userId: string;
+  status: string;
+  objectKey: string | null;
+  mimeType: string | null;
+  provider: string | null;
+  model: string | null;
+  promptVersion: string | null;
+  errorCode: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt: Date | null;
+}): OutfitVisualization {
+  return {
+    id: row.id,
+    outfitId: row.outfitId,
+    userId: row.userId,
+    status: row.status as OutfitVisualizationStatus,
+    objectKey: row.objectKey,
+    mimeType: row.mimeType,
+    provider: row.provider,
+    model: row.model,
+    promptVersion: row.promptVersion,
+    errorCode: row.errorCode,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    completedAt: row.completedAt
   };
 }
 
@@ -131,6 +343,18 @@ function unsupportedUsageEvents(): UsageEventRepositoryPort {
 
 function unsupportedOutfitFeedback(): OutfitFeedbackRepositoryPort {
   return { create: unsupported, findByOutfitId: unsupported };
+}
+
+function unsupportedOutfitVisualizations(): OutfitVisualizationRepositoryPort {
+  return {
+    createPending: unsupported,
+    findById: unsupported,
+    findLatestReadyByOutfitId: unsupported,
+    markProcessing: unsupported,
+    markReady: unsupported,
+    markFailed: unsupported,
+    updateStatus: unsupported
+  };
 }
 
 function unsupportedGarmentStateTransitions(): GarmentStateTransitionRepositoryPort {

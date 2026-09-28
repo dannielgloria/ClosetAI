@@ -18,6 +18,8 @@ import {
   Outfit,
   OutfitFeedback,
   OutfitFeedbackDecision,
+  OutfitVisualization,
+  OutfitVisualizationStatus,
   OutfitStatus,
   UserCredential,
   WeatherContext
@@ -44,6 +46,13 @@ import {
   ObjectStoragePort,
   UploadGarmentImageUseCase
 } from "./garment-analyzer.js";
+import {
+  GenerateOutfitVisualizationUseCase,
+  GetOutfitVisualizationImageUseCase,
+  OutfitVisualizationFailedError,
+  OutfitVisualizationPort,
+  RequestOutfitVisualizationUseCase
+} from "./outfit-visualization.js";
 import {
   ConfirmOutfitUsageUseCase,
   CreateGarmentUseCase,
@@ -290,6 +299,107 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
     },
     findByOutfitId: async (outfitId: string) => [...this.outfitFeedbackRows.values()].filter((feedback) => feedback.outfitId === outfitId)
   };
+  outfitVisualizations = {
+    createPending: async (input: { outfitId: string; userId: string }) => {
+      const now = new Date("2026-08-24T00:00:00.000Z");
+      const row: OutfitVisualization = {
+        id: `visualization-${this.outfitVisualizationRows.size + 1}`,
+        status: OutfitVisualizationStatus.PENDING,
+        objectKey: null,
+        mimeType: null,
+        provider: null,
+        model: null,
+        promptVersion: null,
+        errorCode: null,
+        createdAt: now,
+        updatedAt: now,
+        completedAt: null,
+        ...input
+      };
+      this.outfitVisualizationRows.set(row.id, row);
+      return row;
+    },
+    findById: async (id: string) => this.outfitVisualizationRows.get(id) ?? null,
+    findLatestReadyByOutfitId: async (outfitId: string) =>
+      [...this.outfitVisualizationRows.values()]
+        .filter((visualization) => visualization.outfitId === outfitId && visualization.status === OutfitVisualizationStatus.READY)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null,
+    markProcessing: async (id: string) => {
+      const row = this.outfitVisualizationRows.get(id);
+      if (!row) {
+        throw new Error("Outfit visualization not found.");
+      }
+
+      const updated = { ...row, status: OutfitVisualizationStatus.PROCESSING, errorCode: null, updatedAt: new Date("2026-08-24T00:01:00.000Z") };
+      this.outfitVisualizationRows.set(id, updated);
+      return updated;
+    },
+    markReady: async (input: {
+      id: string;
+      objectKey: string;
+      mimeType: string;
+      provider: string;
+      model: string;
+      promptVersion: string;
+      completedAt: Date;
+    }) => {
+      const row = this.outfitVisualizationRows.get(input.id);
+      if (!row) {
+        throw new Error("Outfit visualization not found.");
+      }
+
+      const updated = {
+        ...row,
+        status: OutfitVisualizationStatus.READY,
+        objectKey: input.objectKey,
+        mimeType: input.mimeType,
+        provider: input.provider,
+        model: input.model,
+        promptVersion: input.promptVersion,
+        errorCode: null,
+        updatedAt: input.completedAt,
+        completedAt: input.completedAt
+      };
+      this.outfitVisualizationRows.set(input.id, updated);
+      return updated;
+    },
+    markFailed: async (input: {
+      id: string;
+      errorCode: string;
+      provider?: string;
+      model?: string;
+      promptVersion?: string;
+      completedAt: Date;
+    }) => {
+      const row = this.outfitVisualizationRows.get(input.id);
+      if (!row) {
+        throw new Error("Outfit visualization not found.");
+      }
+
+      const updated = {
+        ...row,
+        status: OutfitVisualizationStatus.FAILED,
+        provider: input.provider ?? row.provider,
+        model: input.model ?? row.model,
+        promptVersion: input.promptVersion ?? row.promptVersion,
+        errorCode: input.errorCode,
+        updatedAt: input.completedAt,
+        completedAt: input.completedAt
+      };
+      this.outfitVisualizationRows.set(input.id, updated);
+      return updated;
+    },
+    updateStatus: async (id: string, status: OutfitVisualizationStatus) => {
+      const row = this.outfitVisualizationRows.get(id);
+      if (!row) {
+        throw new Error("Outfit visualization not found.");
+      }
+
+      const updated = { ...row, status };
+      this.outfitVisualizationRows.set(id, updated);
+      return updated;
+    }
+  };
   garmentStateTransitions = {
     create: async (input: {
       garmentId: string;
@@ -319,6 +429,7 @@ class InMemoryPorts implements ApplicationPorts, UnitOfWorkPort {
   outfitRows = new Map<string, Outfit>();
   usageEventRows = new Map<string, GarmentUsageEvent>();
   outfitFeedbackRows = new Map<string, OutfitFeedback>();
+  outfitVisualizationRows = new Map<string, OutfitVisualization>();
   garmentStateTransitionRows = new Map<string, GarmentStateTransition>();
   associateImageOnNextFind: string | null = null;
 
@@ -1180,6 +1291,175 @@ describe("MVP use cases", () => {
     expect(await ports.garmentStateTransitions.findByGarmentId(garment.id)).toHaveLength(0);
     expect((await ports.garments.findById(garment.id))?.status).toBe(GarmentStatus.CLEAN_AVAILABLE);
   });
+
+  it("creates a pending outfit visualization and enqueues a small job payload", async () => {
+    const { top, bottom, footwear } = await createBasicEligibleGarments(ports);
+    const outfit = await ports.outfits.create({
+      userId: "user-1",
+      garmentIds: [top.id, bottom.id, footwear.id],
+      explanation: "Ready outfit.",
+      score: 90,
+      status: OutfitStatus.PRESENTED
+    });
+    const queue = new FakeVisualizationQueue();
+
+    const visualization = await new RequestOutfitVisualizationUseCase(ports, queue).execute({
+      userId: "user-1",
+      outfitId: outfit.id
+    });
+
+    expect(visualization.status).toBe(OutfitVisualizationStatus.PENDING);
+    expect(queue.enqueued).toEqual([{ outfitVisualizationId: visualization.id }]);
+  });
+
+  it("rejects visualization requests for another user's outfit", async () => {
+    const { top, bottom, footwear } = await createBasicEligibleGarments(ports);
+    const outfit = await ports.outfits.create({
+      userId: "user-1",
+      garmentIds: [top.id, bottom.id, footwear.id],
+      explanation: "Ready outfit.",
+      score: 90,
+      status: OutfitStatus.PRESENTED
+    });
+
+    await expect(
+      new RequestOutfitVisualizationUseCase(ports, new FakeVisualizationQueue()).execute({
+        userId: "user-2",
+        outfitId: outfit.id
+      })
+    ).rejects.toThrow("Outfit visualization is forbidden.");
+  });
+
+  it("generates and stores a ready outfit visualization", async () => {
+    const storage = new FakeObjectStorage();
+    const { top, bottom, footwear } = await createBasicEligibleGarments(ports);
+    const image = await ports.garmentImages.create({
+      userId: "user-1",
+      objectKey: "users/user-1/garment-images/top.jpg",
+      mimeType: "image/jpeg",
+      size: 2
+    });
+    await storage.writeObject({ objectKey: image.objectKey, content: new Uint8Array([1, 2]), mimeType: image.mimeType });
+    await ports.garmentImages.linkToGarment({ imageId: image.id, garmentId: top.id });
+    const outfit = await ports.outfits.create({
+      userId: "user-1",
+      garmentIds: [top.id, bottom.id, footwear.id],
+      explanation: "Ready outfit.",
+      score: 90,
+      status: OutfitStatus.PRESENTED
+    });
+    const visualization = await ports.outfitVisualizations.createPending({ userId: "user-1", outfitId: outfit.id });
+    const visualizer = new FakeOutfitVisualizer(new Uint8Array([9, 9, 9]));
+
+    const result = await new GenerateOutfitVisualizationUseCase(ports, storage, visualizer).execute({
+      outfitVisualizationId: visualization.id
+    });
+
+    expect(result.status).toBe("generated");
+    expect(result.visualization.status).toBe(OutfitVisualizationStatus.READY);
+    expect(result.visualization.objectKey).toContain(`/outfits/${outfit.id}/visualizations/${visualization.id}.webp`);
+    await expect(storage.readObject(result.visualization.objectKey!)).resolves.toMatchObject({ mimeType: "image/webp" });
+    expect(visualizer.lastInput?.missingImageGarmentIds.sort()).toEqual([bottom.id, footwear.id].sort());
+  });
+
+  it("marks visualization failed without changing the outfit when provider fails", async () => {
+    const storage = new FakeObjectStorage();
+    const { top, bottom, footwear } = await createBasicEligibleGarments(ports);
+    const outfit = await ports.outfits.create({
+      userId: "user-1",
+      garmentIds: [top.id, bottom.id, footwear.id],
+      explanation: "Ready outfit.",
+      score: 90,
+      status: OutfitStatus.PRESENTED
+    });
+    const visualization = await ports.outfitVisualizations.createPending({ userId: "user-1", outfitId: outfit.id });
+
+    await expect(
+      new GenerateOutfitVisualizationUseCase(ports, storage, new FakeOutfitVisualizer(new OutfitVisualizationFailedError())).execute({
+        outfitVisualizationId: visualization.id
+      })
+    ).rejects.toThrow(OutfitVisualizationFailedError);
+
+    expect((await ports.outfitVisualizations.findById(visualization.id))?.status).toBe(OutfitVisualizationStatus.FAILED);
+    expect((await ports.outfits.findById(outfit.id))?.status).toBe(OutfitStatus.PRESENTED);
+  });
+
+  it("does not duplicate work when a ready visualization already has an object", async () => {
+    const storage = new FakeObjectStorage();
+    const { top, bottom, footwear } = await createBasicEligibleGarments(ports);
+    const outfit = await ports.outfits.create({
+      userId: "user-1",
+      garmentIds: [top.id, bottom.id, footwear.id],
+      explanation: "Ready outfit.",
+      score: 90,
+      status: OutfitStatus.PRESENTED
+    });
+    const visualization = await ports.outfitVisualizations.createPending({ userId: "user-1", outfitId: outfit.id });
+    await ports.outfitVisualizations.markReady({
+      id: visualization.id,
+      objectKey: "users/user-1/outfits/outfit-1/visualizations/visualization-1.webp",
+      mimeType: "image/webp",
+      provider: "fake",
+      model: "fake-model",
+      promptVersion: "fake-v1",
+      completedAt: new Date("2026-08-24T00:00:00.000Z")
+    });
+    await storage.writeObject({
+      objectKey: "users/user-1/outfits/outfit-1/visualizations/visualization-1.webp",
+      content: new Uint8Array([1]),
+      mimeType: "image/webp"
+    });
+    const visualizer = new FakeOutfitVisualizer(new Uint8Array([9]));
+
+    const result = await new GenerateOutfitVisualizationUseCase(ports, storage, visualizer).execute({
+      outfitVisualizationId: visualization.id
+    });
+
+    expect(result.status).toBe("already_ready");
+    expect(visualizer.calls).toBe(0);
+  });
+
+  it("serves visualization images only after ownership and ready status are valid", async () => {
+    const storage = new FakeObjectStorage();
+    const { top, bottom, footwear } = await createBasicEligibleGarments(ports);
+    const outfit = await ports.outfits.create({
+      userId: "user-1",
+      garmentIds: [top.id, bottom.id, footwear.id],
+      explanation: "Ready outfit.",
+      score: 90,
+      status: OutfitStatus.PRESENTED
+    });
+    const visualization = await ports.outfitVisualizations.createPending({ userId: "user-1", outfitId: outfit.id });
+    await ports.outfitVisualizations.markReady({
+      id: visualization.id,
+      objectKey: "users/user-1/outfits/outfit-1/visualizations/visualization-1.webp",
+      mimeType: "image/webp",
+      provider: "fake",
+      model: "fake-model",
+      promptVersion: "fake-v1",
+      completedAt: new Date("2026-08-24T00:00:00.000Z")
+    });
+    await storage.writeObject({
+      objectKey: "users/user-1/outfits/outfit-1/visualizations/visualization-1.webp",
+      content: new Uint8Array([1]),
+      mimeType: "image/webp"
+    });
+
+    await expect(
+      new GetOutfitVisualizationImageUseCase(ports, storage).execute({
+        userId: "user-1",
+        outfitId: outfit.id,
+        visualizationId: visualization.id
+      })
+    ).resolves.toMatchObject({ mimeType: "image/webp" });
+    await expect(
+      new GetOutfitVisualizationImageUseCase(ports, storage).execute({
+        userId: "user-2",
+        outfitId: outfit.id,
+        visualizationId: visualization.id
+      })
+    ).rejects.toThrow("Outfit visualization is forbidden.");
+  });
 });
 
 class FakeOutfitStylist implements OutfitStylistPort {
@@ -1198,6 +1478,40 @@ class FakeOutfitStylist implements OutfitStylistPort {
     }
 
     return this.result;
+  }
+}
+
+class FakeVisualizationQueue {
+  enqueued: Array<{ outfitVisualizationId: string }> = [];
+
+  async enqueueVisualization(input: { outfitVisualizationId: string }): Promise<void> {
+    this.enqueued.push(input);
+  }
+}
+
+class FakeOutfitVisualizer implements OutfitVisualizationPort {
+  calls = 0;
+  lastInput: { missingImageGarmentIds: string[] } | null = null;
+
+  constructor(private readonly result: Uint8Array | OutfitVisualizationFailedError) {}
+
+  async generate(input: {
+    visualizationId: string;
+    outfitId: string;
+    missingImageGarmentIds: string[];
+  }) {
+    this.calls += 1;
+    this.lastInput = { missingImageGarmentIds: input.missingImageGarmentIds };
+    if (this.result instanceof OutfitVisualizationFailedError) {
+      throw this.result;
+    }
+
+    return {
+      image: { data: this.result, mimeType: "image/webp" },
+      provider: "fake",
+      model: "fake-model",
+      promptVersion: "fake-v1"
+    };
   }
 }
 

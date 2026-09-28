@@ -11,6 +11,8 @@ import {
   Outfit,
   OutfitFeedback,
   OutfitFeedbackDecision,
+  OutfitVisualization,
+  OutfitVisualizationStatus,
   OutfitStatus,
   UserCredential,
   UserLocation,
@@ -119,6 +121,31 @@ export interface OutfitFeedbackRepositoryPort {
   findByOutfitId(outfitId: EntityId): Promise<OutfitFeedback[]>;
 }
 
+export interface OutfitVisualizationRepositoryPort {
+  createPending(input: { outfitId: EntityId; userId: EntityId }): Promise<OutfitVisualization>;
+  findById(id: EntityId): Promise<OutfitVisualization | null>;
+  findLatestReadyByOutfitId(outfitId: EntityId): Promise<OutfitVisualization | null>;
+  markProcessing(id: EntityId): Promise<OutfitVisualization>;
+  markReady(input: {
+    id: EntityId;
+    objectKey: string;
+    mimeType: string;
+    provider: string;
+    model: string;
+    promptVersion: string;
+    completedAt: Date;
+  }): Promise<OutfitVisualization>;
+  markFailed(input: {
+    id: EntityId;
+    errorCode: string;
+    provider?: string;
+    model?: string;
+    promptVersion?: string;
+    completedAt: Date;
+  }): Promise<OutfitVisualization>;
+  updateStatus(id: EntityId, status: OutfitVisualizationStatus): Promise<OutfitVisualization>;
+}
+
 export interface GarmentStateTransitionRepositoryPort {
   create(input: {
     garmentId: EntityId;
@@ -153,5 +180,6 @@ export interface ApplicationPorts {
   outfits: OutfitRepositoryPort;
   usageEvents: UsageEventRepositoryPort;
   outfitFeedback: OutfitFeedbackRepositoryPort;
+  outfitVisualizations: OutfitVisualizationRepositoryPort;
   garmentStateTransitions: GarmentStateTransitionRepositoryPort;
 }

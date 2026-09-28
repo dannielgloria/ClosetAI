@@ -720,3 +720,72 @@ Responses:
 403 outfit belongs to another user
 404 outfit not found
 ```
+
+### Request Outfit Visualization
+
+```text
+POST /api/v1/outfits/{outfitId}/visualizations
+```
+
+Requires Bearer auth. Creates an on-demand derived visualization for an already
+persisted outfit. If a `READY` visualization already exists, it is reused.
+
+Response (`202`):
+
+```json
+{
+  "id": "uuid",
+  "outfitId": "uuid",
+  "status": "PENDING",
+  "imageAvailable": false,
+  "provider": null,
+  "model": null,
+  "promptVersion": null,
+  "errorCode": null,
+  "createdAt": "2026-08-24T00:00:00.000Z",
+  "updatedAt": "2026-08-24T00:00:00.000Z",
+  "completedAt": null
+}
+```
+
+Statuses: `PENDING`, `PROCESSING`, `READY`, `FAILED`.
+
+```text
+202 visualization accepted or existing READY visualization reused
+401 missing, invalid, expired, or revoked access token
+403 outfit belongs to another user
+404 outfit not found
+```
+
+### Get Outfit Visualization Status
+
+```text
+GET /api/v1/outfits/{outfitId}/visualizations/{visualizationId}
+GET /api/v1/outfits/{outfitId}/visualizations/latest
+```
+
+Requires Bearer auth. The response uses the visualization shape above and never
+exposes the private object key.
+
+```text
+200 status returned
+401 missing, invalid, expired, or revoked access token
+403 outfit or visualization belongs to another user
+404 outfit or visualization not found
+```
+
+### Get Outfit Visualization Image
+
+```text
+GET /api/v1/outfits/{outfitId}/visualizations/{visualizationId}/image
+```
+
+Requires Bearer auth. Returns the private generated image only for a `READY`
+visualization.
+
+```text
+200 image bytes
+401 missing, invalid, expired, or revoked access token
+403 outfit or visualization belongs to another user
+404 visualization is missing or not READY
+```

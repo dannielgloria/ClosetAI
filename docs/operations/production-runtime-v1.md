@@ -32,6 +32,7 @@ Operational or derived:
 - Redis stores BullMQ jobs, rate limits, and weather cache. It uses AOF so queued
   jobs survive normal restarts, but it is not the domain source of truth.
 - Thumbnails are derived and may be regenerated.
+- Outfit visualizations are derived and may be regenerated from persisted outfits, garment metadata, and garment originals.
 
 ## Prerequisites
 
